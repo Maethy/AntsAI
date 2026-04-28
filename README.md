@@ -31,7 +31,6 @@ npm run ios
 - React Native
 - Expo
 - React Native Web
-=======
 # AntsAI
 
 Test for AI Made game with ants.
