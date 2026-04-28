@@ -86,6 +86,8 @@ const capResources = (values, caps) => ({
   research: values.research,
 });
 
+const nowMs = () => Date.now();
+
 export default function App() {
   const [resources, setResources] = useState({ food: 160, wood: 160, stone: 120, research: 0 });
   const [workers, setWorkers] = useState({ farmer: 6, woodcutter: 6, miner: 6 });
@@ -103,6 +105,8 @@ export default function App() {
   const [combatLog, setCombatLog] = useState(['Combat reports will appear here.']);
   const [queenAlive, setQueenAlive] = useState(true);
   const [raidPlan, setRaidPlan] = useState(null);
+  const [pendingJobs, setPendingJobs] = useState([]);
+  const [expeditions, setExpeditions] = useState([]);
   const [activeTab, setActiveTab] = useState('overview');
 
   const totalSoldiers = useMemo(() => countArmyUnits(soldiers), [soldiers]);
@@ -119,28 +123,38 @@ export default function App() {
   }, [techs]);
 
   const defensiveBonus = useMemo(() => 0.05 + buildings.fortifications * 0.03, [buildings.fortifications]);
+  const rates = useMemo(
+    () => ({
+      food: 1 + workers.farmer * 0.6,
+      wood: 1 + workers.woodcutter * 0.55,
+      stone: 0.8 + workers.miner * 0.5,
+      research: scientists * 0.75,
+    }),
+    [workers, scientists]
+  );
+
+  const enqueueJob = (job) => {
+    setPendingJobs((prev) => [...prev, { ...job, id: `${job.kind}-${nowMs()}-${Math.random()}`, completesAt: nowMs() + job.durationMs }]);
+    addColonyLog(`⏳ ${job.label} started (${Math.round(job.durationMs / 1000)}s).`);
+  };
 
   useEffect(() => {
     const timer = setInterval(() => {
       if (!queenAlive) return;
-      const foodGain = 1 + workers.farmer * 0.6;
-      const woodGain = 1 + workers.woodcutter * 0.55;
-      const stoneGain = 0.8 + workers.miner * 0.5;
-      const researchGain = scientists * 0.75;
       setResources((prev) =>
         capResources(
           {
-            food: prev.food + foodGain,
-            wood: prev.wood + woodGain,
-            stone: prev.stone + stoneGain,
-            research: prev.research + researchGain,
+            food: prev.food + rates.food,
+            wood: prev.wood + rates.wood,
+            stone: prev.stone + rates.stone,
+            research: prev.research + rates.research,
           },
           resourceCaps
         )
       );
     }, TICK_MS);
     return () => clearInterval(timer);
-  }, [workers, scientists, resourceCaps, queenAlive]);
+  }, [rates, resourceCaps, queenAlive]);
 
   useEffect(() => {
     const growth = setInterval(() => {
@@ -179,7 +193,25 @@ export default function App() {
     }
     const delay = RAID_MIN_DELAY_MS + Math.floor(Math.random() * (RAID_MAX_DELAY_MS - RAID_MIN_DELAY_MS + 1));
     const attacker = colonies[Math.floor(Math.random() * colonies.length)];
-    setRaidPlan({ attackerId: attacker.id, attackAt: Date.now() + delay, detected: false });
+    const sentArmy = SOLDIER_TYPES.reduce((next, type) => {
+      const available = attacker.army[type] ?? 0;
+      const sent = Math.min(available, Math.max(1, Math.floor(available * 0.6)));
+      return { ...next, [type]: sent };
+    }, {});
+    setColonies((prev) =>
+      prev.map((colony) =>
+        colony.id === attacker.id
+          ? {
+              ...colony,
+              army: SOLDIER_TYPES.reduce(
+                (next, type) => ({ ...next, [type]: Math.max(0, colony.army[type] - sentArmy[type]) }),
+                {}
+              ),
+            }
+          : colony
+      )
+    );
+    setRaidPlan({ attackerId: attacker.id, attackAt: Date.now() + delay, detected: false, attackArmy: sentArmy });
   };
 
   useEffect(() => {
@@ -197,32 +229,34 @@ export default function App() {
     const cost = { food: 14 };
     if (!canAfford(resources, cost)) return addColonyLog('❌ Not enough food for worker.');
     setResources((prev) => payCost(prev, cost));
-    setWorkers((prev) => ({ ...prev, [type]: prev[type] + 1 }));
-    addColonyLog(`${WORKER_ICONS[type]} ${WORKER_LABELS[type]} hatched.`);
+    enqueueJob({
+      kind: 'worker',
+      label: `${WORKER_LABELS[type]}`,
+      durationMs: 15000,
+      payload: { type },
+    });
   };
 
   const trainScientist = () => {
     const cost = { food: 24, wood: 12, stone: 10 };
     if (!canAfford(resources, cost)) return addColonyLog('❌ Not enough resources for scientist.');
     setResources((prev) => payCost(prev, cost));
-    setScientists((prev) => prev + 1);
-    addColonyLog('🧪 Scientist ant trained. Research point generation increased.');
+    enqueueJob({ kind: 'scientist', label: 'Scientist', durationMs: 30000, payload: {} });
   };
 
   const trainScout = () => {
     const cost = { food: 22, wood: 6, stone: 4 };
     if (!canAfford(resources, cost)) return addColonyLog('❌ Not enough resources for scout.');
     setResources((prev) => payCost(prev, cost));
-    setScouts((prev) => prev + 1);
-    addColonyLog('🕵️ Scout ant trained.');
+    enqueueJob({ kind: 'scout', label: 'Scout', durationMs: 20000, payload: {} });
   };
 
   const trainSoldier = (type) => {
     const costs = { cutter: { food: 18, wood: 8, stone: 5 }, stinger: { food: 16, wood: 10, stone: 5 }, shield: { food: 20, wood: 12, stone: 8 } };
     if (!canAfford(resources, costs[type])) return addColonyLog(`❌ Not enough resources for ${TYPE_LABELS[type]}.`);
     setResources((prev) => payCost(prev, costs[type]));
-    setSoldiers((prev) => ({ ...prev, [type]: prev[type] + 1 }));
-    addColonyLog(`${TYPE_ICONS[type]} ${TYPE_LABELS[type]} trained.`);
+    const durationMs = type === 'shield' ? 60000 : type === 'cutter' ? 50000 : 45000;
+    enqueueJob({ kind: 'soldier', label: TYPE_LABELS[type], durationMs, payload: { type } });
   };
 
   const researchTech = (id) => {
@@ -230,8 +264,8 @@ export default function App() {
     if (!tech || techs.includes(id)) return;
     if (!canAfford(resources, tech.cost)) return addColonyLog(`❌ Need resources + research points for ${tech.label}.`);
     setResources((prev) => payCost(prev, tech.cost));
-    setTechs((prev) => [...prev, id]);
-    addColonyLog(`${tech.icon} ${tech.label} researched.`);
+    const durationMs = Math.min(180000, Math.max(45000, tech.cost.research * 2000));
+    enqueueJob({ kind: 'tech', label: tech.label, durationMs, payload: { id } });
   };
 
   const upgradeBuilding = (id) => {
@@ -241,12 +275,8 @@ export default function App() {
     const cost = data.costForLevel(level + 1);
     if (!canAfford(resources, cost)) return addColonyLog(`❌ Not enough resources for ${data.label}.`);
     setResources((prev) => payCost(prev, cost));
-    setBuildings((prev) => {
-      const next = { ...prev, [id]: prev[id] + 1 };
-      updateBuildingEffects(next);
-      return next;
-    });
-    addColonyLog(`${data.icon} ${data.label} upgraded to Lv ${level + 1}.`);
+    const durationMs = Math.min(180000, Math.max(30000, (level + 1) * 30000));
+    enqueueJob({ kind: 'building', label: data.label, durationMs, payload: { id } });
   };
 
   const assignScoutToWatchtower = () => {
@@ -287,31 +317,93 @@ export default function App() {
   const attackColony = (id) => {
     const target = colonies.find((c) => c.id === id);
     if (!target || totalSoldiers <= 0) return;
-    const enemyDefBonus = 0.05 + (target.buildings.fortifications ?? 0) * 0.03;
-    const ourPower = calcArmyPower(soldiers, target.army, techs);
-    const enemyPower = calcArmyPower(target.army, soldiers, []) * (1 + enemyDefBonus);
-    addCombatLog(`⚔️ ${target.name} | Our ${ourPower.toFixed(1)} vs Enemy ${enemyPower.toFixed(1)} (def bonus ${(enemyDefBonus * 100).toFixed(1)}%).`);
-
-    if (ourPower >= enemyPower) {
-      const ratio = Math.min(0.8, (enemyPower / Math.max(1, ourPower)) * 0.35);
-      const losses = applyCasualties(ratio);
-      setResources((prev) => capResources({ food: prev.food + target.reward.food, wood: prev.wood + target.reward.wood, stone: prev.stone + target.reward.stone, research: prev.research }, resourceCaps));
-      setColonies((prev) => prev.filter((c) => c.id !== id));
-      addCombatLog(`🏆 Victory. Losses C:${losses.cutter} S:${losses.stinger} D:${losses.shield}.`);
-      return;
-    }
-
-    const ratio = Math.min(1, (enemyPower / Math.max(1, ourPower)) * 0.45);
-    const losses = applyCasualties(ratio);
-    addCombatLog(`💀 Defeat. Losses C:${losses.cutter} S:${losses.stinger} D:${losses.shield}.`);
+    const sentArmy = SOLDIER_TYPES.reduce((next, type) => {
+      const sent = Math.min(soldiers[type], Math.max(1, Math.floor(soldiers[type] * 0.6)));
+      return { ...next, [type]: sent };
+    }, {});
+    setSoldiers((prev) =>
+      SOLDIER_TYPES.reduce((next, type) => ({ ...next, [type]: Math.max(0, prev[type] - sentArmy[type]) }), {})
+    );
+    setExpeditions((prev) => [
+      ...prev,
+      { id: `exp-${nowMs()}`, targetId: id, sentArmy, resolvesAt: nowMs() + 30000 },
+    ]);
+    addCombatLog(`🚶 Expedition sent to ${target.name}. Army detached from colony for 30s.`);
   };
 
-  const enemyAttack = (attackerId) => {
+  useEffect(() => {
+    const timer = setInterval(() => {
+      const now = nowMs();
+      setPendingJobs((prev) => {
+        const done = prev.filter((job) => job.completesAt <= now);
+        if (done.length === 0) return prev;
+        done.forEach((job) => {
+          if (job.kind === 'worker') {
+            setWorkers((w) => ({ ...w, [job.payload.type]: w[job.payload.type] + 1 }));
+            addColonyLog(`${WORKER_ICONS[job.payload.type]} ${WORKER_LABELS[job.payload.type]} ready.`);
+          } else if (job.kind === 'scientist') {
+            setScientists((s) => s + 1);
+            addColonyLog('🧪 Scientist ready.');
+          } else if (job.kind === 'scout') {
+            setScouts((s) => s + 1);
+            addColonyLog('🕵️ Scout ready.');
+          } else if (job.kind === 'soldier') {
+            setSoldiers((army) => ({ ...army, [job.payload.type]: army[job.payload.type] + 1 }));
+            addColonyLog(`${TYPE_ICONS[job.payload.type]} ${TYPE_LABELS[job.payload.type]} ready.`);
+          } else if (job.kind === 'tech') {
+            setTechs((t) => [...t, job.payload.id]);
+            addColonyLog(`🔬 ${RESEARCH_TREE[job.payload.id].label} completed.`);
+          } else if (job.kind === 'building') {
+            setBuildings((b) => {
+              const next = { ...b, [job.payload.id]: b[job.payload.id] + 1 };
+              updateBuildingEffects(next);
+              return next;
+            });
+            addColonyLog(`🏗️ ${BUILDING_DATA[job.payload.id].label} upgrade completed.`);
+          }
+        });
+        return prev.filter((job) => job.completesAt > now);
+      });
+
+      setExpeditions((prev) => {
+        const resolving = prev.filter((e) => e.resolvesAt <= now);
+        if (resolving.length === 0) return prev;
+        resolving.forEach((exp) => {
+          const target = colonies.find((c) => c.id === exp.targetId);
+          if (!target) {
+            setSoldiers((army) => SOLDIER_TYPES.reduce((next, type) => ({ ...next, [type]: army[type] + exp.sentArmy[type] }), {}));
+            return;
+          }
+          const enemyDefBonus = 0.05 + (target.buildings.fortifications ?? 0) * 0.03;
+          const ourPower = calcArmyPower(exp.sentArmy, target.army, techs);
+          const enemyPower = calcArmyPower(target.army, exp.sentArmy, []) * (1 + enemyDefBonus);
+          if (ourPower >= enemyPower) {
+            const lossRatio = Math.min(0.8, (enemyPower / Math.max(1, ourPower)) * 0.35);
+            const survivors = SOLDIER_TYPES.reduce((next, type) => ({ ...next, [type]: Math.max(0, exp.sentArmy[type] - Math.floor(exp.sentArmy[type] * lossRatio)) }), {});
+            setSoldiers((army) => SOLDIER_TYPES.reduce((next, type) => ({ ...next, [type]: army[type] + survivors[type] }), {}));
+            setResources((r) => capResources({ food: r.food + target.reward.food, wood: r.wood + target.reward.wood, stone: r.stone + target.reward.stone, research: r.research }, resourceCaps));
+            setColonies((c) => c.filter((col) => col.id !== exp.targetId));
+            addCombatLog(`🏆 Expedition won at ${target.name}. Surviving troops returned.`);
+          } else {
+            const survivors = SOLDIER_TYPES.reduce((next, type) => ({ ...next, [type]: Math.max(0, exp.sentArmy[type] - Math.floor(exp.sentArmy[type] * 0.8)) }), {});
+            setSoldiers((army) => SOLDIER_TYPES.reduce((next, type) => ({ ...next, [type]: army[type] + survivors[type] }), {}));
+            addCombatLog(`💀 Expedition failed at ${target.name}. Few troops returned.`);
+          }
+        });
+        return prev.filter((e) => e.resolvesAt > now);
+      });
+    }, 1000);
+
+    return () => clearInterval(timer);
+  }, [colonies, techs, resourceCaps]);
+
+  const enemyAttack = (attackerId, attackArmy) => {
     const attacker = colonies.find((c) => c.id === attackerId);
     if (!attacker) return;
     const enemyDefBonus = 0.05 + (attacker.buildings.fortifications ?? 0) * 0.03;
-    const ourPower = (calcArmyPower(soldiers, attacker.army, techs) + totalWorkers * 0.2) * (1 + defensiveBonus);
-    const enemyPower = calcArmyPower(attacker.army, soldiers, []) * (1 + enemyDefBonus);
+    const raidArmy = attackArmy ?? attacker.army;
+    const ourPower = (calcArmyPower(soldiers, raidArmy, techs) + totalWorkers * 0.2) * (1 + defensiveBonus);
+    const enemyPower = calcArmyPower(raidArmy, soldiers, []) * (1 + enemyDefBonus);
     addCombatLog(`⚠️ Raid ${attacker.name}: Our ${ourPower.toFixed(1)} vs Enemy ${enemyPower.toFixed(1)} | Our def ${(defensiveBonus * 100).toFixed(1)}%.`);
 
     if (ourPower >= enemyPower) {
@@ -347,7 +439,7 @@ export default function App() {
       if (!raidPlan || !queenAlive || colonies.length === 0) return;
       const remaining = raidPlan.attackAt - Date.now();
       if (remaining <= 0) {
-        enemyAttack(raidPlan.attackerId);
+        enemyAttack(raidPlan.attackerId, raidPlan.attackArmy);
         scheduleNextRaid();
         return;
       }
@@ -356,7 +448,7 @@ export default function App() {
         if (Math.random() < chance) {
           setRaidPlan((prev) => (prev ? { ...prev, detected: true } : prev));
           const a = colonies.find((c) => c.id === raidPlan.attackerId);
-          if (a) addCombatLog(`👁️ Watch tower alert: ${a.name} incoming with ${formatArmy(a.army)}.`);
+          if (a) addCombatLog(`👁️ Watch tower alert: ${a.name} incoming with ${formatArmy(raidPlan.attackArmy ?? a.army)}.`);
         }
       }
     }, 1000);
@@ -389,10 +481,10 @@ export default function App() {
 
         <View style={styles.panel}>
           <Text style={styles.panelTitle}>Colony Status</Text>
-          <Text style={styles.metric}>🍖 Food: {Math.floor(resources.food)} / {resourceCaps.food}</Text>
-          <Text style={styles.metric}>🪵 Wood: {Math.floor(resources.wood)} / {resourceCaps.wood}</Text>
-          <Text style={styles.metric}>🪨 Stone: {Math.floor(resources.stone)} / {resourceCaps.stone}</Text>
-          <Text style={styles.metric}>🧪 Research Points: {Math.floor(resources.research)}</Text>
+          <Text style={styles.metric}>🍖 Food: {Math.floor(resources.food)} / {resourceCaps.food} (+{rates.food.toFixed(1)}/s)</Text>
+          <Text style={styles.metric}>🪵 Wood: {Math.floor(resources.wood)} / {resourceCaps.wood} (+{rates.wood.toFixed(1)}/s)</Text>
+          <Text style={styles.metric}>🪨 Stone: {Math.floor(resources.stone)} / {resourceCaps.stone} (+{rates.stone.toFixed(1)}/s)</Text>
+          <Text style={styles.metric}>🧪 Research Points: {Math.floor(resources.research)} (+{rates.research.toFixed(1)}/s)</Text>
           <Text style={styles.metric}>🌾 Farmers: {workers.farmer} | 🪵 Woodcutters: {workers.woodcutter} | ⛏️ Miners: {workers.miner}</Text>
           <Text style={styles.metric}>🧪 Scientists: {scientists}</Text>
           <Text style={styles.metric}>⚔️ Soldiers: {totalSoldiers} ({soldiers.cutter}/{soldiers.stinger}/{soldiers.shield})</Text>
@@ -414,6 +506,11 @@ export default function App() {
             {Object.entries(BUILDING_DATA).map(([id, data]) => (
               <Text key={id} style={styles.metric}>{data.icon} {data.label} Lv {buildings[id]}</Text>
             ))}
+            <Text style={styles.techDesc}>Active jobs: {pendingJobs.length}</Text>
+            {pendingJobs.slice(0, 4).map((job) => (
+              <Text key={job.id} style={styles.techDesc}>⏳ {job.label} - {formatCountdown(job.completesAt - nowMs())}</Text>
+            ))}
+            <Text style={styles.techDesc}>Active expeditions: {expeditions.length}</Text>
           </View>
         )}
 
@@ -442,9 +539,13 @@ export default function App() {
               const level = buildings[id];
               const maxed = level >= data.maxLevel;
               const cost = data.costForLevel(level + 1);
+              const actionLabel =
+                id === 'watchtower' && level === 0
+                  ? `${data.icon} Build ${data.label}`
+                  : `${data.icon} Upgrade ${data.label} (Lv ${level}/${data.maxLevel})`;
               return (
                 <Pressable key={id} style={[styles.techBtn, maxed && styles.techDone]} onPress={() => upgradeBuilding(id)}>
-                  <Text style={styles.buttonText}>{data.icon} Upgrade {data.label} (Lv {level}/{data.maxLevel})</Text>
+                  <Text style={styles.buttonText}>{actionLabel}</Text>
                   <Text style={styles.techDesc}>{maxed ? 'Max level reached' : `Cost ${cost.food}F/${cost.wood}W/${cost.stone}S • ${data.benefitText}`}</Text>
                 </Pressable>
               );
