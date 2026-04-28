@@ -56,12 +56,18 @@ const BUILDING_DATA = {
   nursery: { label: 'Nursery', icon: '🥚', maxLevel: 99, benefitText: '+12 worker cap / level, +1 worker training slot / level', costForLevel: (l) => ({ food: 55 + l * 30, wood: 35 + l * 25, stone: 15 + l * 12 }) },
   barracks: { label: 'Barracks', icon: '🏯', maxLevel: 99, benefitText: '+1 simultaneous soldier training / level', costForLevel: (l) => ({ food: 75 + l * 28, wood: 70 + l * 30, stone: 40 + l * 20 }) },
   academy: { label: 'Academy', icon: '📚', maxLevel: 99, benefitText: '+1 simultaneous technology research / level', costForLevel: (l) => ({ food: 80 + l * 30, wood: 60 + l * 28, stone: 55 + l * 24 }) },
-  watchtower: { label: 'Watch Tower', icon: '🗼', maxLevel: 3, benefitText: 'Up to 3 assigned scouts detect raids', costForLevel: (l) => ({ food: 70 + l * 35, wood: 60 + l * 40, stone: 45 + l * 25 }) },
+  watchtower: { label: 'Watch Tower', icon: '🗼', maxLevel: 5, benefitText: 'Up to 5 assigned scouts detect raids', costForLevel: (l) => ({ food: 70 + l * 35, wood: 60 + l * 40, stone: 45 + l * 25 }) },
   fortifications: { label: 'Fortifications', icon: '🧱', maxLevel: 5, benefitText: '+3% defensive advantage / level', costForLevel: (l) => ({ food: 50 + l * 20, wood: 50 + l * 25, stone: 60 + l * 35 }) },
 };
 
 const RESEARCH_TREE = {
-  metallurgy: { id: 'metallurgy', label: 'Metallurgy', icon: '🔬', cost: { food: 90, wood: 80, stone: 55, research: 35 }, description: 'Soldiers gain +0.25 base power' },
+  metallurgy: { id: 'metallurgy', label: 'Metallurgy', icon: '🔬', cost: { food: 90, wood: 80, stone: 55, research: 35 }, description: 'All soldiers +0.15 power' },
+  cutterDrills: { id: 'cutterDrills', label: 'Cutter Drills', icon: '⚔️', cost: { food: 70, wood: 60, stone: 35, research: 25 }, description: 'Cutter ants +0.35 power' },
+  stingerVenom: { id: 'stingerVenom', label: 'Stinger Venom', icon: '🗡️', cost: { food: 70, wood: 65, stone: 35, research: 25 }, description: 'Stinger ants +0.35 power' },
+  shieldWall: { id: 'shieldWall', label: 'Shield Wall', icon: '🛡️', cost: { food: 80, wood: 70, stone: 40, research: 30 }, description: 'Shield ants +0.35 power' },
+  rapidTraining: { id: 'rapidTraining', label: 'Rapid Training', icon: '🏃', cost: { food: 120, wood: 100, stone: 70, research: 45 }, description: '-25% troop/scout/scientist training time' },
+  modularConstruction: { id: 'modularConstruction', label: 'Modular Construction', icon: '🏗️', cost: { food: 120, wood: 110, stone: 80, research: 45 }, description: '-25% building time' },
+  fastResearch: { id: 'fastResearch', label: 'Fast Research', icon: '📘', cost: { food: 130, wood: 120, stone: 80, research: 55 }, description: '-25% research time' },
   scoutTraining: { id: 'scoutTraining', label: 'Scout Training', icon: '🧭', cost: { food: 80, wood: 60, stone: 40, research: 30 }, description: '+18% scout success chance' },
   spyNetwork: { id: 'spyNetwork', label: 'Spy Network', icon: '🕸️', cost: { food: 120, wood: 110, stone: 65, research: 55 }, description: '+20% scout success chance' },
 };
@@ -72,12 +78,17 @@ const countArmyUnits = (army) => SOLDIER_TYPES.reduce((sum, t) => sum + (army[t]
 const sumWorkers = (workers) => WORKER_TYPES.reduce((sum, t) => sum + (workers[t] ?? 0), 0);
 const formatArmy = (army) => SOLDIER_TYPES.map((t) => `${TYPE_LABELS[t]}:${army[t] ?? 0}`).join(' | ');
 const formatCountdown = (ms) => `${Math.floor(Math.max(0, ms) / 60000)}:${Math.floor((Math.max(0, ms) % 60000) / 1000).toString().padStart(2, '0')}`;
+const withMarkup = (cost) => Object.fromEntries(Object.entries(cost).map(([k, v]) => [k, Math.ceil(v * 1.2)]));
 
 const calcArmyPower = (army, enemyArmy, techs) => {
-  const base = 1.2 + (techs.includes('metallurgy') ? 0.25 : 0);
+  const base = 1.2 + (techs.includes('metallurgy') ? 0.15 : 0);
   return SOLDIER_TYPES.reduce((total, type) => {
     const advantageBonus = (enemyArmy[TYPE_ADVANTAGE[type]] ?? 0) * 0.08;
-    return total + (army[type] ?? 0) * (base + advantageBonus);
+    const typeBonus =
+      (type === 'cutter' && techs.includes('cutterDrills') ? 0.35 : 0) +
+      (type === 'stinger' && techs.includes('stingerVenom') ? 0.35 : 0) +
+      (type === 'shield' && techs.includes('shieldWall') ? 0.35 : 0);
+    return total + (army[type] ?? 0) * (base + advantageBonus + typeBonus);
   }, 0);
 };
 
@@ -127,6 +138,7 @@ export default function App() {
   const [raidPlan, setRaidPlan] = useState(null);
   const [pendingJobs, setPendingJobs] = useState([]);
   const [expeditions, setExpeditions] = useState([]);
+  const [expeditionDrafts, setExpeditionDrafts] = useState({});
   const [activeTab, setActiveTab] = useState('overview');
 
   const totalSoldiers = useMemo(() => countArmyUnits(soldiers), [soldiers]);
@@ -145,10 +157,10 @@ export default function App() {
   const defensiveBonus = useMemo(() => 0.05 + buildings.fortifications * 0.03, [buildings.fortifications]);
   const rates = useMemo(
     () => ({
-      food: 1 + workers.farmer * 0.6,
-      wood: 1 + workers.woodcutter * 0.55,
-      stone: 0.8 + workers.miner * 0.5,
-      research: scientists * 0.75,
+      food: (1 + workers.farmer * 0.6) / 2,
+      wood: (1 + workers.woodcutter * 0.55) / 2,
+      stone: (0.8 + workers.miner * 0.5) / 2,
+      research: (scientists * 0.75) / 2,
     }),
     [workers, scientists]
   );
@@ -282,44 +294,53 @@ export default function App() {
   const updateBuildingEffects = (next) => {
     setResourceCaps({ food: 190 + next.granary * 110, wood: 180 + next.lumberyard * 100, stone: 150 + next.quarry * 95 });
     setWorkerCap(28 + next.nursery * 12);
-    setWatchtowerScouts((prev) => Math.min(prev, Math.min(3, next.watchtower)));
+    setWatchtowerScouts((prev) => Math.min(prev, Math.min(5, next.watchtower)));
   };
 
   const trainWorker = (type) => {
     if (totalWorkers >= workerCap) return addColonyLog('🥚 Worker cap reached. Upgrade nursery.');
-    const cost = { food: 14 };
+    const cost = withMarkup({ food: 14 });
     if (!canAfford(resources, cost)) return addColonyLog('❌ Not enough food for worker.');
     setResources((prev) => payCost(prev, cost));
+    const baseDuration = 15000;
+    const durationMs = techs.includes('rapidTraining') ? Math.round(baseDuration * 0.75) : baseDuration;
     const started = enqueueJob({
       kind: 'worker',
       label: `${WORKER_LABELS[type]}`,
-      durationMs: 15000,
+      durationMs,
       payload: { type },
     });
     if (!started) setResources((prev) => ({ ...prev, food: prev.food + cost.food }));
   };
 
   const trainScientist = () => {
-    const cost = { food: 24, wood: 12, stone: 10 };
+    const cost = withMarkup({ food: 24, wood: 12, stone: 10 });
     if (!canAfford(resources, cost)) return addColonyLog('❌ Not enough resources for scientist.');
     setResources((prev) => payCost(prev, cost));
-    const started = enqueueJob({ kind: 'scientist', label: 'Scientist', durationMs: 30000, payload: {} });
+    const durationMs = techs.includes('rapidTraining') ? Math.round(30000 * 0.75) : 30000;
+    const started = enqueueJob({ kind: 'scientist', label: 'Scientist', durationMs, payload: {} });
     if (!started) setResources((prev) => ({ ...prev, food: prev.food + cost.food, wood: prev.wood + cost.wood, stone: prev.stone + cost.stone }));
   };
 
   const trainScout = () => {
-    const cost = { food: 22, wood: 6, stone: 4 };
+    const cost = withMarkup({ food: 22, wood: 6, stone: 4 });
     if (!canAfford(resources, cost)) return addColonyLog('❌ Not enough resources for scout.');
     setResources((prev) => payCost(prev, cost));
-    const started = enqueueJob({ kind: 'scout', label: 'Scout', durationMs: 20000, payload: {} });
+    const durationMs = techs.includes('rapidTraining') ? Math.round(20000 * 0.75) : 20000;
+    const started = enqueueJob({ kind: 'scout', label: 'Scout', durationMs, payload: {} });
     if (!started) setResources((prev) => ({ ...prev, food: prev.food + cost.food, wood: prev.wood + cost.wood, stone: prev.stone + cost.stone }));
   };
 
   const trainSoldier = (type) => {
-    const costs = { cutter: { food: 18, wood: 8, stone: 5 }, stinger: { food: 16, wood: 10, stone: 5 }, shield: { food: 20, wood: 12, stone: 8 } };
+    const costs = {
+      cutter: withMarkup({ food: 18, wood: 8, stone: 5 }),
+      stinger: withMarkup({ food: 16, wood: 10, stone: 5 }),
+      shield: withMarkup({ food: 20, wood: 12, stone: 8 }),
+    };
     if (!canAfford(resources, costs[type])) return addColonyLog(`❌ Not enough resources for ${TYPE_LABELS[type]}.`);
     setResources((prev) => payCost(prev, costs[type]));
-    const durationMs = type === 'shield' ? 60000 : type === 'cutter' ? 50000 : 45000;
+    const baseDuration = type === 'shield' ? 60000 : type === 'cutter' ? 50000 : 45000;
+    const durationMs = techs.includes('rapidTraining') ? Math.round(baseDuration * 0.75) : baseDuration;
     const started = enqueueJob({ kind: 'soldier', label: TYPE_LABELS[type], durationMs, payload: { type } });
     if (!started) setResources((prev) => ({ ...prev, food: prev.food + costs[type].food, wood: prev.wood + costs[type].wood, stone: prev.stone + costs[type].stone }));
   };
@@ -327,27 +348,34 @@ export default function App() {
   const researchTech = (id) => {
     const tech = RESEARCH_TREE[id];
     if (!tech || techs.includes(id)) return;
-    if (!canAfford(resources, tech.cost)) return addColonyLog(`❌ Need resources + research points for ${tech.label}.`);
-    setResources((prev) => payCost(prev, tech.cost));
-    const durationMs = Math.min(180000, Math.max(45000, tech.cost.research * 2000));
+    const cost = withMarkup(tech.cost);
+    if (!canAfford(resources, cost)) return addColonyLog(`❌ Need resources + research points for ${tech.label}.`);
+    setResources((prev) => payCost(prev, cost));
+    const durationMsRaw = Math.min(180000, Math.max(45000, tech.cost.research * 2000));
+    const durationMs = techs.includes('fastResearch') ? Math.round(durationMsRaw * 0.75) : durationMsRaw;
     const started = enqueueJob({ kind: 'tech', label: tech.label, durationMs, payload: { id } });
-    if (!started) setResources((prev) => ({ ...prev, food: prev.food + tech.cost.food, wood: prev.wood + tech.cost.wood, stone: prev.stone + tech.cost.stone, research: prev.research + tech.cost.research }));
+    if (!started) setResources((prev) => ({ ...prev, food: prev.food + cost.food, wood: prev.wood + cost.wood, stone: prev.stone + cost.stone, research: prev.research + cost.research }));
   };
 
   const upgradeBuilding = (id) => {
     const data = BUILDING_DATA[id];
     const level = buildings[id];
     if (level >= data.maxLevel) return addColonyLog(`${data.icon} ${data.label} at max level.`);
-    const cost = data.costForLevel(level + 1);
+    if (pendingJobs.some((job) => job.kind === 'building' && job.payload?.id === id)) {
+      addColonyLog(`⛔ ${data.label} is already being upgraded.`);
+      return;
+    }
+    const cost = withMarkup(data.costForLevel(level + 1));
     if (!canAfford(resources, cost)) return addColonyLog(`❌ Not enough resources for ${data.label}.`);
     setResources((prev) => payCost(prev, cost));
-    const durationMs = Math.min(180000, Math.max(30000, (level + 1) * 30000));
+    const durationMsRaw = Math.min(180000, Math.max(30000, (level + 1) * 30000));
+    const durationMs = techs.includes('modularConstruction') ? Math.round(durationMsRaw * 0.75) : durationMsRaw;
     const started = enqueueJob({ kind: 'building', label: data.label, durationMs, payload: { id } });
     if (!started) setResources((prev) => ({ ...prev, food: prev.food + cost.food, wood: prev.wood + cost.wood, stone: prev.stone + cost.stone }));
   };
 
   const assignScoutToWatchtower = () => {
-    const limit = Math.min(3, buildings.watchtower);
+    const limit = Math.min(5, buildings.watchtower);
     if (buildings.watchtower <= 0) return addColonyLog('🗼 Build watch tower first.');
     if (watchtowerScouts >= limit) return addColonyLog(`🗼 Watch tower scout limit: ${limit}.`);
     if (scouts <= 0) return addColonyLog('🕵️ No idle scouts.');
@@ -384,10 +412,15 @@ export default function App() {
   const attackColony = (id) => {
     const target = colonies.find((c) => c.id === id);
     if (!target || totalSoldiers <= 0) return;
-    const sentArmy = SOLDIER_TYPES.reduce((next, type) => {
-      const sent = Math.min(soldiers[type], Math.max(1, Math.floor(soldiers[type] * 0.6)));
-      return { ...next, [type]: sent };
-    }, {});
+    const draft = expeditionDrafts[id] ?? { cutter: 0, stinger: 0, shield: 0 };
+    const sentArmy = SOLDIER_TYPES.reduce(
+      (next, type) => ({ ...next, [type]: Math.max(0, Math.min(soldiers[type], draft[type] ?? 0)) }),
+      {}
+    );
+    if (countArmyUnits(sentArmy) <= 0) {
+      addColonyLog('⚠️ Select at least one troop to launch expedition.');
+      return;
+    }
     setSoldiers((prev) =>
       SOLDIER_TYPES.reduce((next, type) => ({ ...next, [type]: Math.max(0, prev[type] - sentArmy[type]) }), {})
     );
@@ -402,6 +435,7 @@ export default function App() {
         resolvesAt: nowMs() + 30000,
       },
     ]);
+    setExpeditionDrafts((prev) => ({ ...prev, [id]: { cutter: 0, stinger: 0, shield: 0 } }));
     addCombatLog(`🚶 Expedition sent to ${target.name}. Army detached from colony for 30s.`);
   };
 
@@ -518,8 +552,8 @@ export default function App() {
         return;
       }
       if (!raidPlan.detected && buildings.watchtower > 0 && watchtowerScouts > 0) {
-        const chance = Math.min(0.45, 0.04 + buildings.watchtower * 0.05 + watchtowerScouts * 0.07);
-        if (Math.random() < chance) {
+        const detectionWindowMs = watchtowerScouts * 60000;
+        if (remaining <= detectionWindowMs) {
           setRaidPlan((prev) => (prev ? { ...prev, detected: true } : prev));
           const a = colonies.find((c) => c.id === raidPlan.attackerId);
           if (a) addCombatLog(`👁️ Watch tower alert: ${a.name} incoming with ${formatArmy(raidPlan.attackArmy ?? a.army)} (Attack power ${(raidPlan.attackPower ?? 0).toFixed(1)}).`);
@@ -537,6 +571,13 @@ export default function App() {
   }, [totalWorkers, totalSoldiers, queenAlive]);
 
   const incomingRaid = raidPlan ? colonies.find((c) => c.id === raidPlan.attackerId) : null;
+  const adjustExpeditionDraft = (colonyId, type, delta) => {
+    setExpeditionDrafts((prev) => {
+      const current = prev[colonyId] ?? { cutter: 0, stinger: 0, shield: 0 };
+      const nextValue = Math.max(0, Math.min(soldiers[type], current[type] + delta));
+      return { ...prev, [colonyId]: { ...current, [type]: nextValue } };
+    });
+  };
 
   return (
     <SafeAreaView style={styles.screen}>
@@ -575,6 +616,15 @@ export default function App() {
                 <Text style={styles.techDesc}>No active jobs or expeditions.</Text>
               ) : (
                 <>
+                  {['worker', 'soldier', 'tech', 'building'].map((lane) => {
+                    const laneJobs = pendingJobs.filter((job) => getQueueLane(job.kind) === lane);
+                    if (laneJobs.length === 0) return null;
+                    return (
+                      <Text key={`lane-${lane}`} style={styles.metric}>
+                        {lane.toUpperCase()} ({laneJobs.length}/{queueCaps[lane] ?? 1})
+                      </Text>
+                    );
+                  })}
                   {pendingJobs.map((job) => {
                     const total = Math.max(1, job.completesAt - job.startedAt);
                     const elapsed = Math.max(0, Date.now() - job.startedAt);
@@ -634,14 +684,14 @@ export default function App() {
             <Text style={styles.panelTitle}>Units</Text>
             <View style={styles.rowWrap}>
               {WORKER_TYPES.map((type) => (
-                <ActionButton key={type} compact label={`${WORKER_ICONS[type]} ${WORKER_LABELS[type]}`} subLabel="(14F)" onPress={() => trainWorker(type)} disabled={!queenAlive} />
+                <ActionButton key={type} compact label={`${WORKER_ICONS[type]} ${WORKER_LABELS[type]}`} subLabel="(17F)" onPress={() => trainWorker(type)} disabled={!queenAlive} />
               ))}
-              <ActionButton compact label="🧪 Scientist" subLabel="(24F/12W/10S)" onPress={trainScientist} disabled={!queenAlive} />
-              <ActionButton compact label="🕵️ Scout" subLabel="(22F/6W/4S)" onPress={trainScout} disabled={!queenAlive} />
+              <ActionButton compact label="🧪 Scientist" subLabel="(29F/15W/12S)" onPress={trainScientist} disabled={!queenAlive} />
+              <ActionButton compact label="🕵️ Scout" subLabel="(27F/8W/5S)" onPress={trainScout} disabled={!queenAlive} />
             </View>
             <View style={styles.rowWrap}>
               {SOLDIER_TYPES.map((type) => (
-                <ActionButton key={type} compact label={`${TYPE_ICONS[type]} ${TYPE_LABELS[type]}`} subLabel={type === 'cutter' ? '(18F/8W/5S)' : type === 'stinger' ? '(16F/10W/5S)' : '(20F/12W/8S)'} onPress={() => trainSoldier(type)} disabled={!queenAlive} />
+                <ActionButton key={type} compact label={`${TYPE_ICONS[type]} ${TYPE_LABELS[type]}`} subLabel={type === 'cutter' ? '(22F/10W/6S)' : type === 'stinger' ? '(20F/12W/6S)' : '(24F/15W/10S)'} onPress={() => trainSoldier(type)} disabled={!queenAlive} />
               ))}
             </View>
           </View>
@@ -653,7 +703,7 @@ export default function App() {
             {Object.entries(BUILDING_DATA).map(([id, data]) => {
               const level = buildings[id];
               const maxed = level >= data.maxLevel;
-              const cost = data.costForLevel(level + 1);
+              const cost = withMarkup(data.costForLevel(level + 1));
               const actionLabel =
                 id === 'watchtower' && level === 0
                   ? `${data.icon} Build ${data.label}`
@@ -669,7 +719,7 @@ export default function App() {
               <ActionButton compact label="➕ Assign Scout" onPress={assignScoutToWatchtower} disabled={!queenAlive} />
               <ActionButton compact label="➖ Recall Scout" onPress={unassignScoutFromWatchtower} disabled={!queenAlive} />
             </View>
-            <Text style={styles.techDesc}>Watch tower scouts: {watchtowerScouts}/{Math.min(3, buildings.watchtower)}</Text>
+            <Text style={styles.techDesc}>Watch tower scouts: {watchtowerScouts}/{Math.min(5, buildings.watchtower)}</Text>
           </View>
         )}
 
@@ -678,9 +728,10 @@ export default function App() {
             <Text style={styles.panelTitle}>Technology</Text>
             {Object.values(RESEARCH_TREE).map((tech) => {
               const complete = techs.includes(tech.id);
+              const cost = withMarkup(tech.cost);
               return (
                 <Pressable key={tech.id} style={[styles.techBtn, complete && styles.techDone]} onPress={() => researchTech(tech.id)}>
-                  <Text style={styles.buttonText}>{tech.icon} {tech.label} ({tech.cost.food}F/{tech.cost.wood}W/{tech.cost.stone}S/{tech.cost.research}RP)</Text>
+                  <Text style={styles.buttonText}>{tech.icon} {tech.label} ({cost.food}F/{cost.wood}W/{cost.stone}S/{cost.research}RP)</Text>
                   <Text style={styles.techDesc}>{complete ? 'Completed' : tech.description}</Text>
                 </Pressable>
               );
@@ -699,6 +750,17 @@ export default function App() {
                   <Text style={styles.techDesc}>Defense: {report ? report.defense : 'Unknown'}</Text>
                   <Text style={styles.techDesc}>Army: {report ? formatArmy(report.army) : 'Unknown'}</Text>
                   <Text style={styles.techDesc}>Growth: Workers {sumWorkers(colony.workers)} | Scientists {colony.scientists}</Text>
+                  <Text style={styles.techDesc}>Detach troops for this expedition:</Text>
+                  {SOLDIER_TYPES.map((type) => {
+                    const draft = expeditionDrafts[colony.id]?.[type] ?? 0;
+                    return (
+                      <View key={`${colony.id}-${type}`} style={styles.row}>
+                        <Text style={styles.techDesc}>{TYPE_LABELS[type]}: {draft}</Text>
+                        <ActionButton compact label="➖" onPress={() => adjustExpeditionDraft(colony.id, type, -1)} disabled={!queenAlive} />
+                        <ActionButton compact label="➕" onPress={() => adjustExpeditionDraft(colony.id, type, 1)} disabled={!queenAlive} />
+                      </View>
+                    );
+                  })}
                   <View style={styles.row}>
                     <ActionButton compact label="🧭 Scout" onPress={() => scoutColony(colony.id)} disabled={!queenAlive} />
                     <ActionButton compact label="⚔️ Attack" onPress={() => attackColony(colony.id)} disabled={!queenAlive} />
@@ -718,7 +780,13 @@ export default function App() {
 
 function ActionButton({ label, subLabel, onPress, disabled, compact }) {
   return (
-    <Pressable style={[styles.actionBtn, compact && styles.actionBtnCompact, disabled && styles.btnDisabled]} onPress={onPress} disabled={disabled}>
+    <Pressable
+      style={[styles.actionBtn, compact && styles.actionBtnCompact, disabled && styles.btnDisabled]}
+      onPress={onPress}
+      disabled={disabled}
+      accessibilityLabel={label}
+      accessibilityHint={subLabel ? `Info: ${subLabel}` : 'Tap to execute this action.'}
+    >
       <Text style={styles.buttonText}>{label}</Text>
       {subLabel ? <Text style={styles.subButtonText}>{subLabel}</Text> : null}
     </Pressable>
