@@ -86,6 +86,32 @@ const capResources = (values, caps) => ({
   research: values.research,
 });
 
+const sumArmy = (army) => SOLDIER_TYPES.reduce((sum, type) => sum + (army[type] ?? 0), 0);
+
+const formatArmy = (army) =>
+  SOLDIER_TYPES.map((type) => `${TYPE_LABELS[type]}:${army[type] ?? 0}`).join(' | ');
+
+const calcArmyPower = (army, enemyArmy, techs) => {
+  const basePower = 1.2 + (techs.includes('metallurgy') ? 0.25 : 0);
+  return SOLDIER_TYPES.reduce((total, type) => {
+    const count = army[type] ?? 0;
+    const target = TYPE_ADVANTAGE[type];
+    const bonus = (enemyArmy[target] ?? 0) * 0.08;
+    return total + count * (basePower + bonus);
+  }, 0);
+};
+
+const capResources = (values, caps) => ({
+  food: Math.min(values.food, caps.food),
+  wood: Math.min(values.wood, caps.wood),
+});
+
+const trimArmy = (army) =>
+  SOLDIER_TYPES.reduce((next, type) => ({ ...next, [type]: Math.max(0, army[type] ?? 0) }), {});
+
+const formatCasualties = (casualties) =>
+  SOLDIER_TYPES.map((type) => `${TYPE_LABELS[type]}-${casualties[type] ?? 0}`).join(', ');
+
 export default function App() {
   const [resources, setResources] = useState({ food: 160, wood: 160, stone: 120, research: 0 });
   const [workers, setWorkers] = useState({ farmer: 6, woodcutter: 6, miner: 6 });
@@ -371,6 +397,122 @@ export default function App() {
   }, [totalWorkers, totalSoldiers, queenAlive]);
 
   const incomingRaid = raidPlan ? colonies.find((c) => c.id === raidPlan.attackerId) : null;
+
+  const renderOverview = () => (
+    <View style={styles.panel}>
+      <Text style={styles.panelTitle}>Colony Overview</Text>
+      <Text style={styles.metric}>Built structures</Text>
+      {Object.entries(BUILDING_DATA).map(([id, data]) => (
+        <Text key={id} style={styles.metric}>
+          {data.icon} {data.label}: Lv {buildings[id]} {buildings[id] > 0 ? data.icon.repeat(buildings[id]) : '—'}
+        </Text>
+      ))}
+      <Text style={styles.techDesc}>Assigned watch tower scouts: {watchtowerScouts} / {Math.min(3, buildings.watchtower)}</Text>
+    </View>
+  );
+
+  const renderUnits = () => (
+    <View style={styles.panel}>
+      <Text style={styles.panelTitle}>Unit Creation</Text>
+      <View style={styles.row}>
+        <ActionButton label="👷 Train Worker" subLabel="(14F)" onPress={trainWorker} disabled={!queenAlive} />
+        <ActionButton label="🕵️ Train Scout" subLabel="(22F/6W)" onPress={trainScout} disabled={!queenAlive} />
+      </View>
+      <Text style={styles.techDesc}>⚔️ Cutter &gt; 🛡️ Shield, 🛡️ Shield &gt; 🗡️ Stinger, 🗡️ Stinger &gt; ⚔️ Cutter</Text>
+      <View style={styles.rowWrap}>
+        {SOLDIER_TYPES.map((type) => (
+          <ActionButton
+            key={type}
+            compact
+            label={`${TYPE_ICONS[type]} ${TYPE_LABELS[type]}`}
+            subLabel={type === 'cutter' ? '(18F/8W)' : type === 'stinger' ? '(16F/10W)' : '(20F/12W)'}
+            onPress={() => trainSoldier(type)}
+            disabled={!queenAlive}
+          />
+        ))}
+      </View>
+    </View>
+  );
+
+  const renderBuildings = () => (
+    <View style={styles.panel}>
+      <Text style={styles.panelTitle}>Buildings</Text>
+      {Object.entries(BUILDING_DATA).map(([id, data]) => {
+        const lvl = buildings[id];
+        const atMax = lvl >= data.maxLevel;
+        const nextCost = data.costForLevel(lvl + 1);
+        return (
+          <Pressable
+            key={id}
+            style={[styles.techBtn, atMax && styles.techDone]}
+            onPress={() => upgradeBuilding(id)}
+            disabled={!queenAlive}
+          >
+            <Text style={styles.buttonText}>
+              {data.icon} Upgrade {data.label} (Lv {lvl}/{data.maxLevel})
+            </Text>
+            <Text style={styles.techDesc}>
+              {atMax ? 'Max level reached' : `Cost ${nextCost.food}F/${nextCost.wood}W • ${data.benefitText}`}
+            </Text>
+          </Pressable>
+        );
+      })}
+
+      <View style={styles.panelInset}>
+        <Text style={styles.metric}>🗼 Watch tower scouts: {watchtowerScouts} / {Math.min(3, buildings.watchtower)}</Text>
+        <View style={styles.row}>
+          <ActionButton compact label="➕ Assign Scout" onPress={assignScoutToWatchtower} disabled={!queenAlive} />
+          <ActionButton compact label="➖ Recall Scout" onPress={unassignScoutFromWatchtower} disabled={!queenAlive} />
+        </View>
+      </View>
+    </View>
+  );
+
+  const renderTechnology = () => (
+    <View style={styles.panel}>
+      <Text style={styles.panelTitle}>Technology</Text>
+      {Object.values(RESEARCH_TREE).map((tech) => {
+        const complete = techs.includes(tech.id);
+        return (
+          <Pressable
+            key={tech.id}
+            style={[styles.techBtn, complete && styles.techDone]}
+            onPress={() => researchTech(tech.id)}
+            disabled={!queenAlive}
+          >
+            <Text style={styles.buttonText}>
+              {tech.icon} {tech.label} ({tech.cost.food}F/{tech.cost.wood}W)
+            </Text>
+            <Text style={styles.techDesc}>{complete ? 'Completed' : tech.description}</Text>
+          </Pressable>
+        );
+      })}
+    </View>
+  );
+
+  const renderEnemies = () => (
+    <View style={styles.panel}>
+      <Text style={styles.panelTitle}>Enemy Colonies</Text>
+      {wonGame ? (
+        <Text style={styles.victory}>👑 You conquered every colony!</Text>
+      ) : (
+        colonies.map((colony) => {
+          const report = intel[colony.id];
+          return (
+            <View key={colony.id} style={styles.enemyCard}>
+              <Text style={styles.metric}>🏰 {colony.name}</Text>
+              <Text style={styles.techDesc}>Defense: {report ? report.defense : 'Unknown (scout required)'}</Text>
+              <Text style={styles.techDesc}>Army: {report ? formatArmy(report.army) : 'Unknown (scout required)'}</Text>
+              <View style={styles.row}>
+                <ActionButton compact label="🧭 Scout" onPress={() => scoutColony(colony.id)} disabled={!queenAlive} />
+                <ActionButton compact label="⚔️ Attack" onPress={() => attackColony(colony.id)} disabled={!queenAlive} />
+              </View>
+            </View>
+          );
+        })
+      )}
+    </View>
+  );
 
   return (
     <SafeAreaView style={styles.screen}>
