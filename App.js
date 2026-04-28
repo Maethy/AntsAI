@@ -1,6 +1,6 @@
 import { StatusBar } from 'expo-status-bar';
 import { useEffect, useMemo, useState } from 'react';
-import { Pressable, SafeAreaView, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Platform, Pressable, SafeAreaView, ScrollView, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 
 const TICK_MS = 1000;
 const RAID_MIN_DELAY_MS = 30000;
@@ -97,6 +97,8 @@ const getQueueKey = (job) => {
 };
 
 export default function App() {
+  const { width } = useWindowDimensions();
+  const isBrowserWide = Platform.OS === 'web' && width >= 900;
   const [resources, setResources] = useState({ food: 160, wood: 160, stone: 120, research: 0 });
   const [workers, setWorkers] = useState({ farmer: 6, woodcutter: 6, miner: 6 });
   const [scientists, setScientists] = useState(1);
@@ -222,6 +224,8 @@ export default function App() {
       const sent = Math.min(available, Math.max(1, Math.floor(available * 0.6)));
       return { ...next, [type]: sent };
     }, {});
+    const attackerDefBonus = 0.05 + (attacker.buildings.fortifications ?? 0) * 0.03;
+    const attackPower = calcArmyPower(sentArmy, { cutter: 0, stinger: 0, shield: 0 }, []) * (1 + attackerDefBonus);
     setColonies((prev) =>
       prev.map((colony) =>
         colony.id === attacker.id
@@ -240,7 +244,7 @@ export default function App() {
       attackAt: Date.now() + delay,
       detected: false,
       attackArmy: sentArmy,
-      attackDefense: attacker.defense,
+      attackPower,
     });
   };
 
@@ -491,7 +495,7 @@ export default function App() {
         if (Math.random() < chance) {
           setRaidPlan((prev) => (prev ? { ...prev, detected: true } : prev));
           const a = colonies.find((c) => c.id === raidPlan.attackerId);
-          if (a) addCombatLog(`👁️ Watch tower alert: ${a.name} incoming with ${formatArmy(raidPlan.attackArmy ?? a.army)} (Defense ${raidPlan.attackDefense ?? a.defense}).`);
+          if (a) addCombatLog(`👁️ Watch tower alert: ${a.name} incoming with ${formatArmy(raidPlan.attackArmy ?? a.army)} (Attack power ${(raidPlan.attackPower ?? 0).toFixed(1)}).`);
         }
       }
     }, 1000);
@@ -518,57 +522,61 @@ export default function App() {
           <View style={styles.raidPopup}>
             <Text style={styles.raidPopupTitle}>🚨 Incoming Raid Detected</Text>
             <Text style={styles.raidPopupText}>{incomingRaid.name} arrives in {formatCountdown(raidPlan.attackAt - Date.now())}</Text>
-            <Text style={styles.raidPopupText}>Army: {formatArmy(raidPlan.attackArmy ?? incomingRaid.army)} | Defense {raidPlan.attackDefense ?? incomingRaid.defense}</Text>
+            <Text style={styles.raidPopupText}>Army: {formatArmy(raidPlan.attackArmy ?? incomingRaid.army)} | Attack power {(raidPlan.attackPower ?? 0).toFixed(1)}</Text>
           </View>
         ) : null}
 
-        <View style={styles.panel}>
-          <Text style={styles.panelTitle}>Colony Status</Text>
-          <Text style={styles.metric}>🍖 Food: {Math.floor(resources.food)} / {resourceCaps.food} (+{rates.food.toFixed(1)}/s)</Text>
-          <Text style={styles.metric}>🪵 Wood: {Math.floor(resources.wood)} / {resourceCaps.wood} (+{rates.wood.toFixed(1)}/s)</Text>
-          <Text style={styles.metric}>🪨 Stone: {Math.floor(resources.stone)} / {resourceCaps.stone} (+{rates.stone.toFixed(1)}/s)</Text>
-          <Text style={styles.metric}>🧪 Research Points: {Math.floor(resources.research)} (+{rates.research.toFixed(1)}/s)</Text>
-          <Text style={styles.metric}>🌾 Farmers: {workers.farmer} | 🪵 Woodcutters: {workers.woodcutter} | ⛏️ Miners: {workers.miner}</Text>
-          <Text style={styles.metric}>🧪 Scientists: {scientists}</Text>
-          <Text style={styles.metric}>⚔️ Soldiers: {totalSoldiers} ({soldiers.cutter}/{soldiers.stinger}/{soldiers.shield})</Text>
-          <Text style={styles.metric}>🛡️ Defensive advantage: {(defensiveBonus * 100).toFixed(1)}%</Text>
-          {!queenAlive && <Text style={styles.defeat}>☠️ Game Over</Text>}
-        </View>
+        <View style={[styles.statusRow, isBrowserWide && styles.statusRowWide]}>
+          <View style={[styles.panel, styles.statusPanel]}>
+            <Text style={styles.panelTitle}>Colony Status</Text>
+            <Text style={styles.metric}>🍖 Food: {Math.floor(resources.food)} / {resourceCaps.food} (+{rates.food.toFixed(1)}/s)</Text>
+            <Text style={styles.metric}>🪵 Wood: {Math.floor(resources.wood)} / {resourceCaps.wood} (+{rates.wood.toFixed(1)}/s)</Text>
+            <Text style={styles.metric}>🪨 Stone: {Math.floor(resources.stone)} / {resourceCaps.stone} (+{rates.stone.toFixed(1)}/s)</Text>
+            <Text style={styles.metric}>🧪 Research Points: {Math.floor(resources.research)} (+{rates.research.toFixed(1)}/s)</Text>
+            <Text style={styles.metric}>🌾 Farmers: {workers.farmer} | 🪵 Woodcutters: {workers.woodcutter} | ⛏️ Miners: {workers.miner}</Text>
+            <Text style={styles.metric}>🧪 Scientists: {scientists}</Text>
+            <Text style={styles.metric}>⚔️ Soldiers: {totalSoldiers} ({soldiers.cutter}/{soldiers.stinger}/{soldiers.shield})</Text>
+            <Text style={styles.metric}>🛡️ Defensive advantage: {(defensiveBonus * 100).toFixed(1)}%</Text>
+            {!queenAlive && <Text style={styles.defeat}>☠️ Game Over</Text>}
+          </View>
 
-        <View style={styles.panel}>
-          <Text style={styles.panelTitle}>In Progress</Text>
-          {pendingJobs.length === 0 && expeditions.length === 0 ? (
-            <Text style={styles.techDesc}>No active jobs or expeditions.</Text>
-          ) : (
-            <>
-              {pendingJobs.map((job) => {
-                const total = Math.max(1, job.completesAt - job.startedAt);
-                const elapsed = Math.max(0, Date.now() - job.startedAt);
-                const progress = Math.max(0, Math.min(1, elapsed / total));
-                return (
-                  <View key={job.id} style={styles.progressRow}>
-                    <Text style={styles.techDesc}>⏳ {job.label} ({Math.round(progress * 100)}%)</Text>
-                    <View style={styles.progressTrack}>
-                      <View style={[styles.progressFill, { width: `${progress * 100}%` }]} />
-                    </View>
-                  </View>
-                );
-              })}
-              {expeditions.map((exp) => {
-                const total = Math.max(1, exp.durationMs ?? exp.resolvesAt - exp.startedAt);
-                const elapsed = Math.max(0, Date.now() - exp.startedAt);
-                const progress = Math.max(0, Math.min(1, elapsed / total));
-                return (
-                  <View key={exp.id} style={styles.progressRow}>
-                    <Text style={styles.techDesc}>⚔️ Expedition ({Math.round(progress * 100)}%)</Text>
-                    <View style={styles.progressTrack}>
-                      <View style={[styles.progressFill, { width: `${progress * 100}%` }]} />
-                    </View>
-                  </View>
-                );
-              })}
-            </>
-          )}
+          <View style={[styles.panel, styles.progressPanel]}>
+            <Text style={styles.panelTitle}>In Progress</Text>
+            <ScrollView style={styles.progressScroll}>
+              {pendingJobs.length === 0 && expeditions.length === 0 ? (
+                <Text style={styles.techDesc}>No active jobs or expeditions.</Text>
+              ) : (
+                <>
+                  {pendingJobs.map((job) => {
+                    const total = Math.max(1, job.completesAt - job.startedAt);
+                    const elapsed = Math.max(0, Date.now() - job.startedAt);
+                    const progress = Math.max(0, Math.min(1, elapsed / total));
+                    return (
+                      <View key={job.id} style={styles.progressRow}>
+                        <Text style={styles.techDesc}>⏳ {job.label} ({Math.round(progress * 100)}%)</Text>
+                        <View style={styles.progressTrack}>
+                          <View style={[styles.progressFill, { width: `${progress * 100}%` }]} />
+                        </View>
+                      </View>
+                    );
+                  })}
+                  {expeditions.map((exp) => {
+                    const total = Math.max(1, exp.durationMs ?? exp.resolvesAt - exp.startedAt);
+                    const elapsed = Math.max(0, Date.now() - exp.startedAt);
+                    const progress = Math.max(0, Math.min(1, elapsed / total));
+                    return (
+                      <View key={exp.id} style={styles.progressRow}>
+                        <Text style={styles.techDesc}>⚔️ Expedition ({Math.round(progress * 100)}%)</Text>
+                        <View style={styles.progressTrack}>
+                          <View style={[styles.progressFill, { width: `${progress * 100}%` }]} />
+                        </View>
+                      </View>
+                    );
+                  })}
+                </>
+              )}
+            </ScrollView>
+          </View>
         </View>
 
         <View style={styles.tabRow}>
@@ -698,6 +706,11 @@ const styles = StyleSheet.create({
   raidPopupTitle: { color: '#ffe9e9', fontWeight: '700', textAlign: 'center' },
   raidPopupText: { color: '#ffe9e9', textAlign: 'center', fontSize: 12 },
   panel: { backgroundColor: '#1a2a24', borderWidth: 1, borderColor: '#2d453b', borderRadius: 12, padding: 12, gap: 6 },
+  statusRow: { gap: 12 },
+  statusRowWide: { flexDirection: 'row', alignItems: 'stretch' },
+  statusPanel: { flex: 1 },
+  progressPanel: { flex: 1, minHeight: 230, maxHeight: 230 },
+  progressScroll: { flex: 1 },
   panelTitle: { color: '#dcf2e0', fontSize: 18, fontWeight: '700', marginBottom: 4 },
   metric: { color: '#e3f1e6', fontSize: 15 },
   row: { flexDirection: 'row', gap: 8 },
