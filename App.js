@@ -154,6 +154,7 @@ export default function App() {
         ...job,
         queueKey,
         id: `${job.kind}-${nowMs()}-${Math.random()}`,
+        startedAt: nowMs(),
         completesAt: nowMs() + job.durationMs,
       },
     ]);
@@ -234,7 +235,13 @@ export default function App() {
           : colony
       )
     );
-    setRaidPlan({ attackerId: attacker.id, attackAt: Date.now() + delay, detected: false, attackArmy: sentArmy });
+    setRaidPlan({
+      attackerId: attacker.id,
+      attackAt: Date.now() + delay,
+      detected: false,
+      attackArmy: sentArmy,
+      attackDefense: attacker.defense,
+    });
   };
 
   useEffect(() => {
@@ -355,7 +362,14 @@ export default function App() {
     );
     setExpeditions((prev) => [
       ...prev,
-      { id: `exp-${nowMs()}`, targetId: id, sentArmy, resolvesAt: nowMs() + 30000 },
+      {
+        id: `exp-${nowMs()}`,
+        targetId: id,
+        sentArmy,
+        startedAt: nowMs(),
+        durationMs: 30000,
+        resolvesAt: nowMs() + 30000,
+      },
     ]);
     addCombatLog(`🚶 Expedition sent to ${target.name}. Army detached from colony for 30s.`);
   };
@@ -477,7 +491,7 @@ export default function App() {
         if (Math.random() < chance) {
           setRaidPlan((prev) => (prev ? { ...prev, detected: true } : prev));
           const a = colonies.find((c) => c.id === raidPlan.attackerId);
-          if (a) addCombatLog(`👁️ Watch tower alert: ${a.name} incoming with ${formatArmy(raidPlan.attackArmy ?? a.army)}.`);
+          if (a) addCombatLog(`👁️ Watch tower alert: ${a.name} incoming with ${formatArmy(raidPlan.attackArmy ?? a.army)} (Defense ${raidPlan.attackDefense ?? a.defense}).`);
         }
       }
     }, 1000);
@@ -504,7 +518,7 @@ export default function App() {
           <View style={styles.raidPopup}>
             <Text style={styles.raidPopupTitle}>🚨 Incoming Raid Detected</Text>
             <Text style={styles.raidPopupText}>{incomingRaid.name} arrives in {formatCountdown(raidPlan.attackAt - Date.now())}</Text>
-            <Text style={styles.raidPopupText}>Army: {formatArmy(raidPlan.attackArmy ?? incomingRaid.army)} | Defense {incomingRaid.defense}</Text>
+            <Text style={styles.raidPopupText}>Army: {formatArmy(raidPlan.attackArmy ?? incomingRaid.army)} | Defense {raidPlan.attackDefense ?? incomingRaid.defense}</Text>
           </View>
         ) : null}
 
@@ -519,6 +533,42 @@ export default function App() {
           <Text style={styles.metric}>⚔️ Soldiers: {totalSoldiers} ({soldiers.cutter}/{soldiers.stinger}/{soldiers.shield})</Text>
           <Text style={styles.metric}>🛡️ Defensive advantage: {(defensiveBonus * 100).toFixed(1)}%</Text>
           {!queenAlive && <Text style={styles.defeat}>☠️ Game Over</Text>}
+        </View>
+
+        <View style={styles.panel}>
+          <Text style={styles.panelTitle}>In Progress</Text>
+          {pendingJobs.length === 0 && expeditions.length === 0 ? (
+            <Text style={styles.techDesc}>No active jobs or expeditions.</Text>
+          ) : (
+            <>
+              {pendingJobs.map((job) => {
+                const total = Math.max(1, job.completesAt - job.startedAt);
+                const elapsed = Math.max(0, Date.now() - job.startedAt);
+                const progress = Math.max(0, Math.min(1, elapsed / total));
+                return (
+                  <View key={job.id} style={styles.progressRow}>
+                    <Text style={styles.techDesc}>⏳ {job.label} ({Math.round(progress * 100)}%)</Text>
+                    <View style={styles.progressTrack}>
+                      <View style={[styles.progressFill, { width: `${progress * 100}%` }]} />
+                    </View>
+                  </View>
+                );
+              })}
+              {expeditions.map((exp) => {
+                const total = Math.max(1, exp.durationMs ?? exp.resolvesAt - exp.startedAt);
+                const elapsed = Math.max(0, Date.now() - exp.startedAt);
+                const progress = Math.max(0, Math.min(1, elapsed / total));
+                return (
+                  <View key={exp.id} style={styles.progressRow}>
+                    <Text style={styles.techDesc}>⚔️ Expedition ({Math.round(progress * 100)}%)</Text>
+                    <View style={styles.progressTrack}>
+                      <View style={[styles.progressFill, { width: `${progress * 100}%` }]} />
+                    </View>
+                  </View>
+                );
+              })}
+            </>
+          )}
         </View>
 
         <View style={styles.tabRow}>
@@ -662,6 +712,9 @@ const styles = StyleSheet.create({
   techBtn: { backgroundColor: '#365746', borderRadius: 10, padding: 10, marginBottom: 6 },
   techDone: { opacity: 0.6 },
   techDesc: { color: '#cbe4d0', marginTop: 2, fontSize: 12 },
+  progressRow: { gap: 4, marginBottom: 6 },
+  progressTrack: { height: 8, backgroundColor: '#2d453b', borderRadius: 99, overflow: 'hidden' },
+  progressFill: { height: 8, backgroundColor: '#6ecf9c' },
   defeat: { color: '#ffb1b1', fontSize: 15, fontWeight: '700' },
   enemyCard: { backgroundColor: '#2a3f34', borderRadius: 10, padding: 9, marginBottom: 8, gap: 4 },
   logItem: { color: '#d7ebdb', fontSize: 13 },
