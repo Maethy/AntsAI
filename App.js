@@ -7,14 +7,14 @@ const RAID_MIN_DELAY_MS = 30000;
 const RAID_MAX_DELAY_MS = 600000;
 const ENEMY_GROWTH_MS = 25000;
 const SOLDIER_TYPES = ['cutter', 'stinger', 'shield'];
-const WORKER_TYPES = ['farmer', 'woodcutter', 'miner'];
+const WORKER_TYPES = ['farmer', 'woodcutter', 'miner', 'builder'];
 const TABS = ['overview', 'units', 'buildings', 'technology', 'enemies'];
 
 const TYPE_LABELS = { cutter: 'Cutter', stinger: 'Stinger', shield: 'Shield' };
 const TYPE_ICONS = { cutter: '⚔️', stinger: '🗡️', shield: '🛡️' };
 const TYPE_ADVANTAGE = { cutter: 'shield', shield: 'stinger', stinger: 'cutter' };
-const WORKER_LABELS = { farmer: 'Farmer', woodcutter: 'Woodcutter', miner: 'Stone Miner' };
-const WORKER_ICONS = { farmer: '🌾', woodcutter: '🪵', miner: '⛏️' };
+const WORKER_LABELS = { farmer: 'Farmer', woodcutter: 'Woodcutter', miner: 'Stone Miner', builder: 'Builder' };
+const WORKER_ICONS = { farmer: '🌾', woodcutter: '🪵', miner: '⛏️', builder: '🧱' };
 
 const createInitialColonies = () => [
   {
@@ -23,7 +23,7 @@ const createInitialColonies = () => [
     defense: 18,
     reward: { food: 80, wood: 70, stone: 50 },
     army: { cutter: 3, stinger: 3, shield: 3 },
-    workers: { farmer: 6, woodcutter: 6, miner: 6 },
+    workers: { farmer: 6, woodcutter: 6, miner: 6, builder: 1 },
     scientists: 1,
     buildings: { fortifications: 1 },
   },
@@ -33,7 +33,7 @@ const createInitialColonies = () => [
     defense: 18,
     reward: { food: 80, wood: 70, stone: 50 },
     army: { cutter: 3, stinger: 3, shield: 3 },
-    workers: { farmer: 6, woodcutter: 6, miner: 6 },
+    workers: { farmer: 6, woodcutter: 6, miner: 6, builder: 1 },
     scientists: 1,
     buildings: { fortifications: 1 },
   },
@@ -43,7 +43,7 @@ const createInitialColonies = () => [
     defense: 18,
     reward: { food: 80, wood: 70, stone: 50 },
     army: { cutter: 3, stinger: 3, shield: 3 },
-    workers: { farmer: 6, woodcutter: 6, miner: 6 },
+    workers: { farmer: 6, woodcutter: 6, miner: 6, builder: 1 },
     scientists: 1,
     buildings: { fortifications: 1 },
   },
@@ -53,7 +53,9 @@ const BUILDING_DATA = {
   granary: { label: 'Granary', icon: '🏚️', maxLevel: 4, benefitText: '+110 food cap / level', costForLevel: (l) => ({ food: 40 + l * 30, wood: 45 + l * 35, stone: 20 + l * 10 }) },
   lumberyard: { label: 'Lumberyard', icon: '🪵', maxLevel: 4, benefitText: '+100 wood cap / level', costForLevel: (l) => ({ food: 30 + l * 20, wood: 50 + l * 30, stone: 18 + l * 10 }) },
   quarry: { label: 'Quarry Depot', icon: '🪨', maxLevel: 4, benefitText: '+95 stone cap / level', costForLevel: (l) => ({ food: 35 + l * 20, wood: 35 + l * 20, stone: 35 + l * 25 }) },
-  nursery: { label: 'Nursery', icon: '🥚', maxLevel: 4, benefitText: '+12 worker cap / level', costForLevel: (l) => ({ food: 55 + l * 30, wood: 35 + l * 25, stone: 15 + l * 12 }) },
+  nursery: { label: 'Nursery', icon: '🥚', maxLevel: 99, benefitText: '+12 worker cap / level, +1 worker training slot / level', costForLevel: (l) => ({ food: 55 + l * 30, wood: 35 + l * 25, stone: 15 + l * 12 }) },
+  barracks: { label: 'Barracks', icon: '🏯', maxLevel: 99, benefitText: '+1 simultaneous soldier training / level', costForLevel: (l) => ({ food: 75 + l * 28, wood: 70 + l * 30, stone: 40 + l * 20 }) },
+  academy: { label: 'Academy', icon: '📚', maxLevel: 99, benefitText: '+1 simultaneous technology research / level', costForLevel: (l) => ({ food: 80 + l * 30, wood: 60 + l * 28, stone: 55 + l * 24 }) },
   watchtower: { label: 'Watch Tower', icon: '🗼', maxLevel: 3, benefitText: 'Up to 3 assigned scouts detect raids', costForLevel: (l) => ({ food: 70 + l * 35, wood: 60 + l * 40, stone: 45 + l * 25 }) },
   fortifications: { label: 'Fortifications', icon: '🧱', maxLevel: 5, benefitText: '+3% defensive advantage / level', costForLevel: (l) => ({ food: 50 + l * 20, wood: 50 + l * 25, stone: 60 + l * 35 }) },
 };
@@ -96,18 +98,26 @@ const getQueueKey = (job) => {
   return job.kind;
 };
 
+const getQueueLane = (kind) => {
+  if (kind === 'soldier') return 'soldier';
+  if (kind === 'building') return 'building';
+  if (kind === 'tech') return 'tech';
+  if (kind === 'worker' || kind === 'scout' || kind === 'scientist') return 'worker';
+  return kind;
+};
+
 export default function App() {
   const { width } = useWindowDimensions();
   const isBrowserWide = Platform.OS === 'web' && width >= 900;
   const [resources, setResources] = useState({ food: 160, wood: 160, stone: 120, research: 0 });
-  const [workers, setWorkers] = useState({ farmer: 6, woodcutter: 6, miner: 6 });
+  const [workers, setWorkers] = useState({ farmer: 6, woodcutter: 6, miner: 6, builder: 1 });
   const [scientists, setScientists] = useState(1);
   const [workerCap, setWorkerCap] = useState(40);
   const [soldiers, setSoldiers] = useState({ cutter: 3, stinger: 3, shield: 3 });
   const [scouts, setScouts] = useState(2);
   const [watchtowerScouts, setWatchtowerScouts] = useState(0);
   const [techs, setTechs] = useState([]);
-  const [buildings, setBuildings] = useState({ granary: 1, lumberyard: 1, quarry: 1, nursery: 1, watchtower: 0, fortifications: 1 });
+  const [buildings, setBuildings] = useState({ granary: 1, lumberyard: 1, quarry: 1, nursery: 1, barracks: 1, academy: 1, watchtower: 0, fortifications: 1 });
   const [resourceCaps, setResourceCaps] = useState({ food: 300, wood: 280, stone: 230 });
   const [colonies, setColonies] = useState(createInitialColonies());
   const [intel, setIntel] = useState({});
@@ -142,12 +152,28 @@ export default function App() {
     }),
     [workers, scientists]
   );
+  const queueCaps = useMemo(
+    () => ({
+      worker: Math.max(1, buildings.nursery),
+      soldier: Math.max(1, buildings.barracks),
+      tech: Math.max(1, buildings.academy),
+      building: Math.max(1, workers.builder),
+    }),
+    [buildings.nursery, buildings.barracks, buildings.academy, workers.builder]
+  );
 
   const enqueueJob = (job) => {
     const queueKey = getQueueKey(job);
+    const lane = getQueueLane(job.kind);
     const queuedForType = pendingJobs.filter((entry) => entry.queueKey === queueKey).length;
     if (queuedForType >= 10) {
       addColonyLog(`🧾 Queue full for ${job.label} (max 10).`);
+      return false;
+    }
+    const activeInLane = pendingJobs.filter((entry) => getQueueLane(entry.kind) === lane).length;
+    const laneCap = queueCaps[lane] ?? 1;
+    if (activeInLane >= laneCap) {
+      addColonyLog(`⛔ ${lane} queue is full (${activeInLane}/${laneCap}).`);
       return false;
     }
     setPendingJobs((prev) => [
@@ -191,6 +217,7 @@ export default function App() {
             farmer: colony.workers.farmer + 1,
             woodcutter: colony.workers.woodcutter + 1,
             miner: colony.workers.miner + 1,
+            builder: colony.workers.builder + (Math.random() < 0.4 ? 1 : 0),
           },
           scientists: colony.scientists + 1,
           army: {
@@ -533,10 +560,11 @@ export default function App() {
             <Text style={styles.metric}>🪵 Wood: {Math.floor(resources.wood)} / {resourceCaps.wood} (+{rates.wood.toFixed(1)}/s)</Text>
             <Text style={styles.metric}>🪨 Stone: {Math.floor(resources.stone)} / {resourceCaps.stone} (+{rates.stone.toFixed(1)}/s)</Text>
             <Text style={styles.metric}>🧪 Research Points: {Math.floor(resources.research)} (+{rates.research.toFixed(1)}/s)</Text>
-            <Text style={styles.metric}>🌾 Farmers: {workers.farmer} | 🪵 Woodcutters: {workers.woodcutter} | ⛏️ Miners: {workers.miner}</Text>
+            <Text style={styles.metric}>🌾 Farmers: {workers.farmer} | 🪵 Woodcutters: {workers.woodcutter} | ⛏️ Miners: {workers.miner} | 🧱 Builders: {workers.builder}</Text>
             <Text style={styles.metric}>🧪 Scientists: {scientists}</Text>
             <Text style={styles.metric}>⚔️ Soldiers: {totalSoldiers} ({soldiers.cutter}/{soldiers.stinger}/{soldiers.shield})</Text>
             <Text style={styles.metric}>🛡️ Defensive advantage: {(defensiveBonus * 100).toFixed(1)}%</Text>
+            <Text style={styles.techDesc}>Queue slots → Workers {queueCaps.worker}, Soldiers {queueCaps.soldier}, Tech {queueCaps.tech}, Buildings {queueCaps.building}</Text>
             {!queenAlive && <Text style={styles.defeat}>☠️ Game Over</Text>}
           </View>
 
