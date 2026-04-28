@@ -88,6 +88,14 @@ const capResources = (values, caps) => ({
 
 const nowMs = () => Date.now();
 
+const getQueueKey = (job) => {
+  if (job.kind === 'worker') return `worker:${job.payload.type}`;
+  if (job.kind === 'soldier') return `soldier:${job.payload.type}`;
+  if (job.kind === 'building') return `building:${job.payload.id}`;
+  if (job.kind === 'tech') return `tech:${job.payload.id}`;
+  return job.kind;
+};
+
 export default function App() {
   const [resources, setResources] = useState({ food: 160, wood: 160, stone: 120, research: 0 });
   const [workers, setWorkers] = useState({ farmer: 6, woodcutter: 6, miner: 6 });
@@ -134,8 +142,23 @@ export default function App() {
   );
 
   const enqueueJob = (job) => {
-    setPendingJobs((prev) => [...prev, { ...job, id: `${job.kind}-${nowMs()}-${Math.random()}`, completesAt: nowMs() + job.durationMs }]);
+    const queueKey = getQueueKey(job);
+    const queuedForType = pendingJobs.filter((entry) => entry.queueKey === queueKey).length;
+    if (queuedForType >= 10) {
+      addColonyLog(`🧾 Queue full for ${job.label} (max 10).`);
+      return false;
+    }
+    setPendingJobs((prev) => [
+      ...prev,
+      {
+        ...job,
+        queueKey,
+        id: `${job.kind}-${nowMs()}-${Math.random()}`,
+        completesAt: nowMs() + job.durationMs,
+      },
+    ]);
     addColonyLog(`⏳ ${job.label} started (${Math.round(job.durationMs / 1000)}s).`);
+    return true;
   };
 
   useEffect(() => {
@@ -229,26 +252,29 @@ export default function App() {
     const cost = { food: 14 };
     if (!canAfford(resources, cost)) return addColonyLog('❌ Not enough food for worker.');
     setResources((prev) => payCost(prev, cost));
-    enqueueJob({
+    const started = enqueueJob({
       kind: 'worker',
       label: `${WORKER_LABELS[type]}`,
       durationMs: 15000,
       payload: { type },
     });
+    if (!started) setResources((prev) => ({ ...prev, food: prev.food + cost.food }));
   };
 
   const trainScientist = () => {
     const cost = { food: 24, wood: 12, stone: 10 };
     if (!canAfford(resources, cost)) return addColonyLog('❌ Not enough resources for scientist.');
     setResources((prev) => payCost(prev, cost));
-    enqueueJob({ kind: 'scientist', label: 'Scientist', durationMs: 30000, payload: {} });
+    const started = enqueueJob({ kind: 'scientist', label: 'Scientist', durationMs: 30000, payload: {} });
+    if (!started) setResources((prev) => ({ ...prev, food: prev.food + cost.food, wood: prev.wood + cost.wood, stone: prev.stone + cost.stone }));
   };
 
   const trainScout = () => {
     const cost = { food: 22, wood: 6, stone: 4 };
     if (!canAfford(resources, cost)) return addColonyLog('❌ Not enough resources for scout.');
     setResources((prev) => payCost(prev, cost));
-    enqueueJob({ kind: 'scout', label: 'Scout', durationMs: 20000, payload: {} });
+    const started = enqueueJob({ kind: 'scout', label: 'Scout', durationMs: 20000, payload: {} });
+    if (!started) setResources((prev) => ({ ...prev, food: prev.food + cost.food, wood: prev.wood + cost.wood, stone: prev.stone + cost.stone }));
   };
 
   const trainSoldier = (type) => {
@@ -256,7 +282,8 @@ export default function App() {
     if (!canAfford(resources, costs[type])) return addColonyLog(`❌ Not enough resources for ${TYPE_LABELS[type]}.`);
     setResources((prev) => payCost(prev, costs[type]));
     const durationMs = type === 'shield' ? 60000 : type === 'cutter' ? 50000 : 45000;
-    enqueueJob({ kind: 'soldier', label: TYPE_LABELS[type], durationMs, payload: { type } });
+    const started = enqueueJob({ kind: 'soldier', label: TYPE_LABELS[type], durationMs, payload: { type } });
+    if (!started) setResources((prev) => ({ ...prev, food: prev.food + costs[type].food, wood: prev.wood + costs[type].wood, stone: prev.stone + costs[type].stone }));
   };
 
   const researchTech = (id) => {
@@ -265,7 +292,8 @@ export default function App() {
     if (!canAfford(resources, tech.cost)) return addColonyLog(`❌ Need resources + research points for ${tech.label}.`);
     setResources((prev) => payCost(prev, tech.cost));
     const durationMs = Math.min(180000, Math.max(45000, tech.cost.research * 2000));
-    enqueueJob({ kind: 'tech', label: tech.label, durationMs, payload: { id } });
+    const started = enqueueJob({ kind: 'tech', label: tech.label, durationMs, payload: { id } });
+    if (!started) setResources((prev) => ({ ...prev, food: prev.food + tech.cost.food, wood: prev.wood + tech.cost.wood, stone: prev.stone + tech.cost.stone, research: prev.research + tech.cost.research }));
   };
 
   const upgradeBuilding = (id) => {
@@ -276,7 +304,8 @@ export default function App() {
     if (!canAfford(resources, cost)) return addColonyLog(`❌ Not enough resources for ${data.label}.`);
     setResources((prev) => payCost(prev, cost));
     const durationMs = Math.min(180000, Math.max(30000, (level + 1) * 30000));
-    enqueueJob({ kind: 'building', label: data.label, durationMs, payload: { id } });
+    const started = enqueueJob({ kind: 'building', label: data.label, durationMs, payload: { id } });
+    if (!started) setResources((prev) => ({ ...prev, food: prev.food + cost.food, wood: prev.wood + cost.wood, stone: prev.stone + cost.stone }));
   };
 
   const assignScoutToWatchtower = () => {
@@ -475,7 +504,7 @@ export default function App() {
           <View style={styles.raidPopup}>
             <Text style={styles.raidPopupTitle}>🚨 Incoming Raid Detected</Text>
             <Text style={styles.raidPopupText}>{incomingRaid.name} arrives in {formatCountdown(raidPlan.attackAt - Date.now())}</Text>
-            <Text style={styles.raidPopupText}>Army: {formatArmy(incomingRaid.army)} | Defense {incomingRaid.defense}</Text>
+            <Text style={styles.raidPopupText}>Army: {formatArmy(raidPlan.attackArmy ?? incomingRaid.army)} | Defense {incomingRaid.defense}</Text>
           </View>
         ) : null}
 
