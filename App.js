@@ -1,124 +1,90 @@
 import { StatusBar } from 'expo-status-bar';
 import { useEffect, useMemo, useState } from 'react';
-import {
-  Pressable,
-  SafeAreaView,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native';
+import { Pressable, SafeAreaView, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 const TICK_MS = 1000;
-const ENEMY_ATTACK_MS = 18000;
+const RAID_MIN_DELAY_MS = 30000;
+const RAID_MAX_DELAY_MS = 600000;
+const ENEMY_GROWTH_MS = 25000;
 const SOLDIER_TYPES = ['cutter', 'stinger', 'shield'];
+const WORKER_TYPES = ['farmer', 'woodcutter', 'miner'];
 const TABS = ['overview', 'units', 'buildings', 'technology', 'enemies'];
 
-const TYPE_LABELS = {
-  cutter: 'Cutter',
-  stinger: 'Stinger',
-  shield: 'Shield',
-};
+const TYPE_LABELS = { cutter: 'Cutter', stinger: 'Stinger', shield: 'Shield' };
+const TYPE_ICONS = { cutter: '⚔️', stinger: '🗡️', shield: '🛡️' };
+const TYPE_ADVANTAGE = { cutter: 'shield', shield: 'stinger', stinger: 'cutter' };
+const WORKER_LABELS = { farmer: 'Farmer', woodcutter: 'Woodcutter', miner: 'Stone Miner' };
+const WORKER_ICONS = { farmer: '🌾', woodcutter: '🪵', miner: '⛏️' };
 
-const TYPE_ICONS = {
-  cutter: '⚔️',
-  stinger: '🗡️',
-  shield: '🛡️',
-};
-
-const TYPE_ADVANTAGE = {
-  cutter: 'shield',
-  shield: 'stinger',
-  stinger: 'cutter',
-};
-
-const INITIAL_COLONIES = [
+const createInitialColonies = () => [
   {
     id: 'red',
     name: 'Crimson Nest',
-    defense: 25,
-    reward: { food: 100, wood: 70 },
-    army: { cutter: 7, stinger: 5, shield: 6 },
+    defense: 18,
+    reward: { food: 80, wood: 70, stone: 50 },
+    army: { cutter: 3, stinger: 3, shield: 3 },
+    workers: { farmer: 6, woodcutter: 6, miner: 6 },
+    scientists: 1,
+    buildings: { fortifications: 1 },
   },
   {
     id: 'blue',
     name: 'Azure Nest',
-    defense: 35,
-    reward: { food: 130, wood: 100 },
-    army: { cutter: 9, stinger: 8, shield: 8 },
+    defense: 18,
+    reward: { food: 80, wood: 70, stone: 50 },
+    army: { cutter: 3, stinger: 3, shield: 3 },
+    workers: { farmer: 6, woodcutter: 6, miner: 6 },
+    scientists: 1,
+    buildings: { fortifications: 1 },
   },
   {
     id: 'gold',
     name: 'Golden Nest',
-    defense: 50,
-    reward: { food: 180, wood: 130 },
-    army: { cutter: 11, stinger: 12, shield: 10 },
+    defense: 18,
+    reward: { food: 80, wood: 70, stone: 50 },
+    army: { cutter: 3, stinger: 3, shield: 3 },
+    workers: { farmer: 6, woodcutter: 6, miner: 6 },
+    scientists: 1,
+    buildings: { fortifications: 1 },
   },
 ];
 
 const BUILDING_DATA = {
-  granary: {
-    label: 'Granary',
-    icon: '🏚️',
-    maxLevel: 4,
-    benefitText: '+110 food storage / level',
-    costForLevel: (level) => ({ food: 40 + level * 30, wood: 45 + level * 35 }),
-  },
-  lumberyard: {
-    label: 'Lumberyard',
-    icon: '🪵',
-    maxLevel: 4,
-    benefitText: '+90 wood storage / level',
-    costForLevel: (level) => ({ food: 30 + level * 25, wood: 50 + level * 35 }),
-  },
-  nursery: {
-    label: 'Nursery',
-    icon: '🥚',
-    maxLevel: 4,
-    benefitText: '+12 worker cap / level',
-    costForLevel: (level) => ({ food: 55 + level * 30, wood: 35 + level * 25 }),
-  },
-  watchtower: {
-    label: 'Watch Tower',
-    icon: '🗼',
-    maxLevel: 3,
-    benefitText: 'Allows assigning up to 3 scouts to detect incoming raids',
-    costForLevel: (level) => ({ food: 70 + level * 35, wood: 60 + level * 40 }),
-  },
+  granary: { label: 'Granary', icon: '🏚️', maxLevel: 4, benefitText: '+110 food cap / level', costForLevel: (l) => ({ food: 40 + l * 30, wood: 45 + l * 35, stone: 20 + l * 10 }) },
+  lumberyard: { label: 'Lumberyard', icon: '🪵', maxLevel: 4, benefitText: '+100 wood cap / level', costForLevel: (l) => ({ food: 30 + l * 20, wood: 50 + l * 30, stone: 18 + l * 10 }) },
+  quarry: { label: 'Quarry Depot', icon: '🪨', maxLevel: 4, benefitText: '+95 stone cap / level', costForLevel: (l) => ({ food: 35 + l * 20, wood: 35 + l * 20, stone: 35 + l * 25 }) },
+  nursery: { label: 'Nursery', icon: '🥚', maxLevel: 4, benefitText: '+12 worker cap / level', costForLevel: (l) => ({ food: 55 + l * 30, wood: 35 + l * 25, stone: 15 + l * 12 }) },
+  watchtower: { label: 'Watch Tower', icon: '🗼', maxLevel: 3, benefitText: 'Up to 3 assigned scouts detect raids', costForLevel: (l) => ({ food: 70 + l * 35, wood: 60 + l * 40, stone: 45 + l * 25 }) },
+  fortifications: { label: 'Fortifications', icon: '🧱', maxLevel: 5, benefitText: '+3% defensive advantage / level', costForLevel: (l) => ({ food: 50 + l * 20, wood: 50 + l * 25, stone: 60 + l * 35 }) },
 };
 
 const RESEARCH_TREE = {
-  metallurgy: {
-    id: 'metallurgy',
-    label: 'Metallurgy',
-    icon: '🔬',
-    cost: { food: 90, wood: 80 },
-    description: 'Soldiers gain +0.25 base power',
-  },
-  scoutTraining: {
-    id: 'scoutTraining',
-    label: 'Scout Training',
-    icon: '🧭',
-    cost: { food: 80, wood: 60 },
-    description: '+18% scout success chance',
-  },
-  spyNetwork: {
-    id: 'spyNetwork',
-    label: 'Spy Network',
-    icon: '🕸️',
-    cost: { food: 120, wood: 110 },
-    description: '+20% scout success chance',
-  },
+  metallurgy: { id: 'metallurgy', label: 'Metallurgy', icon: '🔬', cost: { food: 90, wood: 80, stone: 55, research: 35 }, description: 'Soldiers gain +0.25 base power' },
+  scoutTraining: { id: 'scoutTraining', label: 'Scout Training', icon: '🧭', cost: { food: 80, wood: 60, stone: 40, research: 30 }, description: '+18% scout success chance' },
+  spyNetwork: { id: 'spyNetwork', label: 'Spy Network', icon: '🕸️', cost: { food: 120, wood: 110, stone: 65, research: 55 }, description: '+20% scout success chance' },
 };
 
-const canAfford = (resources, cost) =>
-  Object.entries(cost).every(([key, value]) => resources[key] >= value);
+const canAfford = (resources, cost) => Object.entries(cost).every(([k, v]) => resources[k] >= v);
+const payCost = (resources, cost) => Object.entries(cost).reduce((next, [k, v]) => ({ ...next, [k]: next[k] - v }), resources);
+const sumArmy = (army) => SOLDIER_TYPES.reduce((sum, t) => sum + (army[t] ?? 0), 0);
+const sumWorkers = (workers) => WORKER_TYPES.reduce((sum, t) => sum + (workers[t] ?? 0), 0);
+const formatArmy = (army) => SOLDIER_TYPES.map((t) => `${TYPE_LABELS[t]}:${army[t] ?? 0}`).join(' | ');
+const formatCountdown = (ms) => `${Math.floor(Math.max(0, ms) / 60000)}:${Math.floor((Math.max(0, ms) % 60000) / 1000).toString().padStart(2, '0')}`;
 
-const payCost = (resources, cost) =>
-  Object.entries(cost).reduce(
-    (next, [key, value]) => ({ ...next, [key]: next[key] - value }),
-    resources
-  );
+const calcArmyPower = (army, enemyArmy, techs) => {
+  const base = 1.2 + (techs.includes('metallurgy') ? 0.25 : 0);
+  return SOLDIER_TYPES.reduce((total, type) => {
+    const advantageBonus = (enemyArmy[TYPE_ADVANTAGE[type]] ?? 0) * 0.08;
+    return total + (army[type] ?? 0) * (base + advantageBonus);
+  }, 0);
+};
+
+const capResources = (values, caps) => ({
+  food: Math.min(values.food, caps.food),
+  wood: Math.min(values.wood, caps.wood),
+  stone: Math.min(values.stone, caps.stone),
+  research: values.research,
+});
 
 const sumArmy = (army) => SOLDIER_TYPES.reduce((sum, type) => sum + (army[type] ?? 0), 0);
 
@@ -147,339 +113,290 @@ const formatCasualties = (casualties) =>
   SOLDIER_TYPES.map((type) => `${TYPE_LABELS[type]}-${casualties[type] ?? 0}`).join(', ');
 
 export default function App() {
-  const [resources, setResources] = useState({ food: 140, wood: 130 });
-  const [workers, setWorkers] = useState(18);
+  const [resources, setResources] = useState({ food: 160, wood: 160, stone: 120, research: 0 });
+  const [workers, setWorkers] = useState({ farmer: 6, woodcutter: 6, miner: 6 });
+  const [scientists, setScientists] = useState(1);
   const [workerCap, setWorkerCap] = useState(40);
   const [soldiers, setSoldiers] = useState({ cutter: 3, stinger: 3, shield: 3 });
   const [scouts, setScouts] = useState(2);
   const [watchtowerScouts, setWatchtowerScouts] = useState(0);
   const [techs, setTechs] = useState([]);
-  const [buildings, setBuildings] = useState({ granary: 1, lumberyard: 1, nursery: 1, watchtower: 0 });
-  const [resourceCaps, setResourceCaps] = useState({ food: 280, wood: 240 });
-  const [colonies, setColonies] = useState(INITIAL_COLONIES);
+  const [buildings, setBuildings] = useState({ granary: 1, lumberyard: 1, quarry: 1, nursery: 1, watchtower: 0, fortifications: 1 });
+  const [resourceCaps, setResourceCaps] = useState({ food: 300, wood: 280, stone: 230 });
+  const [colonies, setColonies] = useState(createInitialColonies());
   const [intel, setIntel] = useState({});
-  const [colonyLog, setColonyLog] = useState(['Queen: Build, scout, and defend the nest.']);
+  const [colonyLog, setColonyLog] = useState(['Queen: Grow wisely. Enemies grow too.']);
   const [combatLog, setCombatLog] = useState(['Combat reports will appear here.']);
   const [queenAlive, setQueenAlive] = useState(true);
-  const [raidPulse, setRaidPulse] = useState(0);
+  const [raidPlan, setRaidPlan] = useState(null);
   const [activeTab, setActiveTab] = useState('overview');
 
   const totalSoldiers = useMemo(() => sumArmy(soldiers), [soldiers]);
+  const totalWorkers = useMemo(() => sumWorkers(workers), [workers]);
+
+  const addColonyLog = (m) => setColonyLog((p) => [m, ...p].slice(0, 12));
+  const addCombatLog = (m) => setCombatLog((p) => [m, ...p].slice(0, 14));
 
   const scoutSuccessChance = useMemo(() => {
-    let chance = 0.5;
-    if (techs.includes('scoutTraining')) chance += 0.18;
-    if (techs.includes('spyNetwork')) chance += 0.2;
-    return Math.min(0.95, chance);
+    let c = 0.5;
+    if (techs.includes('scoutTraining')) c += 0.18;
+    if (techs.includes('spyNetwork')) c += 0.2;
+    return Math.min(0.95, c);
   }, [techs]);
 
-  const addColonyLog = (message) => {
-    setColonyLog((prev) => [message, ...prev].slice(0, 12));
-  };
-
-  const addCombatLog = (message) => {
-    setCombatLog((prev) => [message, ...prev].slice(0, 14));
-  };
+  const defensiveBonus = useMemo(() => 0.05 + buildings.fortifications * 0.03, [buildings.fortifications]);
 
   useEffect(() => {
     const timer = setInterval(() => {
       if (!queenAlive) return;
-      const foodGain = 2 + workers * 0.45;
-      const woodGain = 1 + workers * 0.3;
-      setResources((prev) => capResources({ food: prev.food + foodGain, wood: prev.wood + woodGain }, resourceCaps));
+      const foodGain = 1 + workers.farmer * 0.6;
+      const woodGain = 1 + workers.woodcutter * 0.55;
+      const stoneGain = 0.8 + workers.miner * 0.5;
+      const researchGain = scientists * 0.75;
+      setResources((prev) =>
+        capResources(
+          {
+            food: prev.food + foodGain,
+            wood: prev.wood + woodGain,
+            stone: prev.stone + stoneGain,
+            research: prev.research + researchGain,
+          },
+          resourceCaps
+        )
+      );
     }, TICK_MS);
-
     return () => clearInterval(timer);
-  }, [workers, resourceCaps, queenAlive]);
+  }, [workers, scientists, resourceCaps, queenAlive]);
 
   useEffect(() => {
-    const enemyTimer = setInterval(() => {
-      setRaidPulse((prev) => prev + 1);
-    }, ENEMY_ATTACK_MS);
-
-    return () => clearInterval(enemyTimer);
+    const growth = setInterval(() => {
+      setColonies((prev) =>
+        prev.map((colony) => ({
+          ...colony,
+          workers: {
+            farmer: colony.workers.farmer + 1,
+            woodcutter: colony.workers.woodcutter + 1,
+            miner: colony.workers.miner + 1,
+          },
+          scientists: colony.scientists + 1,
+          army: {
+            cutter: colony.army.cutter + (Math.random() < 0.5 ? 1 : 0),
+            stinger: colony.army.stinger + (Math.random() < 0.5 ? 1 : 0),
+            shield: colony.army.shield + (Math.random() < 0.5 ? 1 : 0),
+          },
+          buildings: { ...colony.buildings, fortifications: colony.buildings.fortifications + (Math.random() < 0.45 ? 1 : 0) },
+          defense: colony.defense + 2,
+          reward: {
+            food: colony.reward.food + 10,
+            wood: colony.reward.wood + 10,
+            stone: colony.reward.stone + 8,
+          },
+        }))
+      );
+      addColonyLog('📈 Enemy colonies expanded and became stronger.');
+    }, ENEMY_GROWTH_MS);
+    return () => clearInterval(growth);
   }, []);
 
-  const updateBuildingEffects = (nextBuildings) => {
-    setResourceCaps({
-      food: 170 + nextBuildings.granary * 110,
-      wood: 150 + nextBuildings.lumberyard * 90,
-    });
-    setWorkerCap(28 + nextBuildings.nursery * 12);
-
-    const maxAssigned = Math.min(3, nextBuildings.watchtower);
-    setWatchtowerScouts((prev) => Math.min(prev, maxAssigned));
+  const scheduleNextRaid = () => {
+    if (!queenAlive || colonies.length === 0) {
+      setRaidPlan(null);
+      return;
+    }
+    const delay = RAID_MIN_DELAY_MS + Math.floor(Math.random() * (RAID_MAX_DELAY_MS - RAID_MIN_DELAY_MS + 1));
+    const attacker = colonies[Math.floor(Math.random() * colonies.length)];
+    setRaidPlan({ attackerId: attacker.id, attackAt: Date.now() + delay, detected: false });
   };
 
-  const assignScoutToWatchtower = () => {
-    const maxAssigned = Math.min(3, buildings.watchtower);
-    if (buildings.watchtower <= 0) {
-      addColonyLog('🗼 Build the watch tower before assigning scouts.');
-      return;
-    }
-    if (watchtowerScouts >= maxAssigned) {
-      addColonyLog(`🗼 Watch tower can host only ${maxAssigned} assigned scouts.`);
-      return;
-    }
-    if (scouts <= 0) {
-      addColonyLog('🕵️ No available scouts to assign.');
-      return;
-    }
+  useEffect(() => {
+    if (!raidPlan && queenAlive && colonies.length > 0) scheduleNextRaid();
+  }, [raidPlan, queenAlive, colonies.length]);
 
-    setScouts((prev) => prev - 1);
-    setWatchtowerScouts((prev) => prev + 1);
-    addColonyLog('🗼 Assigned 1 scout to the watch tower.');
+  const updateBuildingEffects = (next) => {
+    setResourceCaps({ food: 190 + next.granary * 110, wood: 180 + next.lumberyard * 100, stone: 150 + next.quarry * 95 });
+    setWorkerCap(28 + next.nursery * 12);
+    setWatchtowerScouts((prev) => Math.min(prev, Math.min(3, next.watchtower)));
   };
 
-  const unassignScoutFromWatchtower = () => {
-    if (watchtowerScouts <= 0) {
-      addColonyLog('🗼 No assigned scout to remove.');
-      return;
-    }
-
-    setWatchtowerScouts((prev) => prev - 1);
-    setScouts((prev) => prev + 1);
-    addColonyLog('🕵️ Recalled 1 scout from the watch tower.');
-  };
-
-  const trainWorker = () => {
+  const trainWorker = (type) => {
+    if (totalWorkers >= workerCap) return addColonyLog('🥚 Worker cap reached. Upgrade nursery.');
     const cost = { food: 14 };
-    if (workers >= workerCap) {
-      addColonyLog('🥚 Nursery full. Upgrade the nursery to raise worker cap.');
-      return;
-    }
-    if (!canAfford(resources, cost)) {
-      addColonyLog('❌ Not enough food to hatch a worker (cost: 14 food).');
-      return;
-    }
-
+    if (!canAfford(resources, cost)) return addColonyLog('❌ Not enough food for worker.');
     setResources((prev) => payCost(prev, cost));
-    setWorkers((prev) => prev + 1);
-    addColonyLog('👷 Worker hatched. More workers gather resources faster.');
+    setWorkers((prev) => ({ ...prev, [type]: prev[type] + 1 }));
+    addColonyLog(`${WORKER_ICONS[type]} ${WORKER_LABELS[type]} hatched.`);
+  };
+
+  const trainScientist = () => {
+    const cost = { food: 24, wood: 12, stone: 10 };
+    if (!canAfford(resources, cost)) return addColonyLog('❌ Not enough resources for scientist.');
+    setResources((prev) => payCost(prev, cost));
+    setScientists((prev) => prev + 1);
+    addColonyLog('🧪 Scientist ant trained. Research point generation increased.');
+  };
+
+  const trainScout = () => {
+    const cost = { food: 22, wood: 6, stone: 4 };
+    if (!canAfford(resources, cost)) return addColonyLog('❌ Not enough resources for scout.');
+    setResources((prev) => payCost(prev, cost));
+    setScouts((prev) => prev + 1);
+    addColonyLog('🕵️ Scout ant trained.');
   };
 
   const trainSoldier = (type) => {
-    const costs = {
-      cutter: { food: 18, wood: 8 },
-      stinger: { food: 16, wood: 10 },
-      shield: { food: 20, wood: 12 },
-    };
-    const cost = costs[type];
-    if (!canAfford(resources, cost)) {
-      addColonyLog(`❌ Not enough resources for ${TYPE_LABELS[type]} (cost: ${cost.food}F/${cost.wood}W).`);
-      return;
-    }
-
-    setResources((prev) => payCost(prev, cost));
+    const costs = { cutter: { food: 18, wood: 8, stone: 5 }, stinger: { food: 16, wood: 10, stone: 5 }, shield: { food: 20, wood: 12, stone: 8 } };
+    if (!canAfford(resources, costs[type])) return addColonyLog(`❌ Not enough resources for ${TYPE_LABELS[type]}.`);
+    setResources((prev) => payCost(prev, costs[type]));
     setSoldiers((prev) => ({ ...prev, [type]: prev[type] + 1 }));
     addColonyLog(`${TYPE_ICONS[type]} ${TYPE_LABELS[type]} trained.`);
   };
 
-  const trainScout = () => {
-    const cost = { food: 22, wood: 6 };
-    if (!canAfford(resources, cost)) {
-      addColonyLog('❌ Not enough resources for scout (cost: 22F/6W).');
-      return;
-    }
-
-    setResources((prev) => payCost(prev, cost));
-    setScouts((prev) => prev + 1);
-    addColonyLog('🕵️ Scout ant prepared for reconnaissance.');
-  };
-
-  const researchTech = (techId) => {
-    const tech = RESEARCH_TREE[techId];
-    if (!tech || techs.includes(techId)) return;
-
-    if (!canAfford(resources, tech.cost)) {
-      addColonyLog(`❌ Not enough resources for ${tech.label}.`);
-      return;
-    }
-
+  const researchTech = (id) => {
+    const tech = RESEARCH_TREE[id];
+    if (!tech || techs.includes(id)) return;
+    if (!canAfford(resources, tech.cost)) return addColonyLog(`❌ Need resources + research points for ${tech.label}.`);
     setResources((prev) => payCost(prev, tech.cost));
-    setTechs((prev) => [...prev, techId]);
-    addColonyLog(`${tech.icon} Research complete: ${tech.label}.`);
+    setTechs((prev) => [...prev, id]);
+    addColonyLog(`${tech.icon} ${tech.label} researched.`);
   };
 
-  const upgradeBuilding = (buildingId) => {
-    const building = BUILDING_DATA[buildingId];
-    if (!building) return;
-
-    const level = buildings[buildingId];
-    if (level >= building.maxLevel) {
-      addColonyLog(`${building.icon} ${building.label} is already at max level.`);
-      return;
-    }
-
-    const cost = building.costForLevel(level + 1);
-    if (!canAfford(resources, cost)) {
-      addColonyLog(`❌ Not enough resources for ${building.label} upgrade.`);
-      return;
-    }
-
+  const upgradeBuilding = (id) => {
+    const data = BUILDING_DATA[id];
+    const level = buildings[id];
+    if (level >= data.maxLevel) return addColonyLog(`${data.icon} ${data.label} at max level.`);
+    const cost = data.costForLevel(level + 1);
+    if (!canAfford(resources, cost)) return addColonyLog(`❌ Not enough resources for ${data.label}.`);
     setResources((prev) => payCost(prev, cost));
     setBuildings((prev) => {
-      const next = { ...prev, [buildingId]: prev[buildingId] + 1 };
+      const next = { ...prev, [id]: prev[id] + 1 };
       updateBuildingEffects(next);
       return next;
     });
+    addColonyLog(`${data.icon} ${data.label} upgraded to Lv ${level + 1}.`);
+  };
 
-    addColonyLog(`${building.icon} Upgraded ${building.label} to level ${level + 1}.`);
+  const assignScoutToWatchtower = () => {
+    const limit = Math.min(3, buildings.watchtower);
+    if (buildings.watchtower <= 0) return addColonyLog('🗼 Build watch tower first.');
+    if (watchtowerScouts >= limit) return addColonyLog(`🗼 Watch tower scout limit: ${limit}.`);
+    if (scouts <= 0) return addColonyLog('🕵️ No idle scouts.');
+    setScouts((p) => p - 1);
+    setWatchtowerScouts((p) => p + 1);
+  };
+
+  const unassignScoutFromWatchtower = () => {
+    if (watchtowerScouts <= 0) return;
+    setScouts((p) => p + 1);
+    setWatchtowerScouts((p) => p - 1);
   };
 
   const applyCasualties = (ratio) => {
-    const casualties = SOLDIER_TYPES.reduce((next, type) => {
-      const current = soldiers[type];
-      const loss = Math.min(current, Math.max(0, Math.floor(current * ratio)));
-      return { ...next, [type]: loss };
-    }, {});
-
-    const nextArmy = SOLDIER_TYPES.reduce(
-      (next, type) => ({ ...next, [type]: soldiers[type] - casualties[type] }),
-      {}
-    );
-
-    setSoldiers(trimArmy(nextArmy));
-    return casualties;
+    const losses = {};
+    SOLDIER_TYPES.forEach((type) => {
+      losses[type] = Math.min(soldiers[type], Math.floor(soldiers[type] * ratio));
+    });
+    setSoldiers((prev) => ({ cutter: prev.cutter - losses.cutter, stinger: prev.stinger - losses.stinger, shield: prev.shield - losses.shield }));
+    return losses;
   };
 
-  const scoutColony = (colonyId) => {
-    if (scouts <= 0) {
-      addColonyLog('🕵️ No idle scouts. Train a scout ant first.');
-      return;
-    }
-
-    const target = colonies.find((colony) => colony.id === colonyId);
+  const scoutColony = (id) => {
+    if (scouts <= 0) return addColonyLog('🕵️ No idle scouts.');
+    const target = colonies.find((c) => c.id === id);
     if (!target) return;
-
-    setScouts((prev) => prev - 1);
-    const success = Math.random() < scoutSuccessChance;
-
-    if (!success) {
-      addColonyLog(`💥 Scout failed at ${target.name}. The ant was lost.`);
-      return;
-    }
-
-    setScouts((prev) => prev + 1);
-    setIntel((prev) => ({
-      ...prev,
-      [colonyId]: {
-        defense: target.defense,
-        army: target.army,
-        lastSeen: Date.now(),
-      },
-    }));
-
-    addColonyLog(`✅ Scout report from ${target.name}: defense ${target.defense}, army ${formatArmy(target.army)}.`);
+    setScouts((p) => p - 1);
+    if (Math.random() >= scoutSuccessChance) return addColonyLog(`💥 Scout failed at ${target.name}.`);
+    setScouts((p) => p + 1);
+    setIntel((prev) => ({ ...prev, [id]: { defense: target.defense, army: target.army, workers: target.workers, scientists: target.scientists } }));
+    addColonyLog(`✅ Scout report: ${target.name} defense ${target.defense}, army ${formatArmy(target.army)}.`);
   };
 
-  const attackColony = (colonyId) => {
-    const colony = colonies.find((entry) => entry.id === colonyId);
-    if (!colony || totalSoldiers <= 0) {
-      addColonyLog('⚠️ No soldiers available for attack.');
+  const attackColony = (id) => {
+    const target = colonies.find((c) => c.id === id);
+    if (!target || totalSoldiers <= 0) return;
+    const enemyDefBonus = 0.05 + (target.buildings.fortifications ?? 0) * 0.03;
+    const ourPower = calcArmyPower(soldiers, target.army, techs);
+    const enemyPower = calcArmyPower(target.army, soldiers, []) * (1 + enemyDefBonus);
+    addCombatLog(`⚔️ ${target.name} | Our ${ourPower.toFixed(1)} vs Enemy ${enemyPower.toFixed(1)} (def bonus ${(enemyDefBonus * 100).toFixed(1)}%).`);
+
+    if (ourPower >= enemyPower) {
+      const ratio = Math.min(0.8, (enemyPower / Math.max(1, ourPower)) * 0.35);
+      const losses = applyCasualties(ratio);
+      setResources((prev) => capResources({ food: prev.food + target.reward.food, wood: prev.wood + target.reward.wood, stone: prev.stone + target.reward.stone, research: prev.research }, resourceCaps));
+      setColonies((prev) => prev.filter((c) => c.id !== id));
+      addCombatLog(`🏆 Victory. Losses C:${losses.cutter} S:${losses.stinger} D:${losses.shield}.`);
       return;
     }
 
-    const playerPower = calcArmyPower(soldiers, colony.army, techs);
-    const enemyArmyPower = calcArmyPower(colony.army, soldiers, []);
-    const enemyPower = enemyArmyPower + colony.defense;
-
-    addCombatLog(
-      `⚔️ Attack ${colony.name} | Our power ${playerPower.toFixed(1)} vs Enemy ${enemyPower.toFixed(1)} (Army ${enemyArmyPower.toFixed(1)} + Defense ${colony.defense}).`
-    );
-
-    if (playerPower >= enemyPower) {
-      const casualtyRatio = Math.min(0.8, (enemyPower / Math.max(1, playerPower)) * 0.35);
-      const casualties = applyCasualties(casualtyRatio);
-      const totalLosses = sumArmy(casualties);
-      setResources((prev) =>
-        capResources(
-          { food: prev.food + colony.reward.food, wood: prev.wood + colony.reward.wood },
-          resourceCaps
-        )
-      );
-      setColonies((prev) => prev.filter((entry) => entry.id !== colonyId));
-      addCombatLog(
-        `🏆 Victory at ${colony.name} | Casualty ratio ${(casualtyRatio * 100).toFixed(1)}% | Losses: ${formatCasualties(casualties)} | Loot ${colony.reward.food}F/${colony.reward.wood}W.`
-      );
-      addColonyLog(`🏆 ${colony.name} conquered.`);
-      return;
-    }
-
-    const casualtyRatio = Math.min(1, (enemyPower / Math.max(1, playerPower)) * 0.45);
-    const casualties = applyCasualties(casualtyRatio);
-    addCombatLog(
-      `💀 Defeat at ${colony.name} | Casualty ratio ${(casualtyRatio * 100).toFixed(1)}% | Losses: ${formatCasualties(casualties)}.`
-    );
+    const ratio = Math.min(1, (enemyPower / Math.max(1, ourPower)) * 0.45);
+    const losses = applyCasualties(ratio);
+    addCombatLog(`💀 Defeat. Losses C:${losses.cutter} S:${losses.stinger} D:${losses.shield}.`);
   };
 
-  const enemyAttack = () => {
-    const attacker = colonies[Math.floor(Math.random() * colonies.length)];
+  const enemyAttack = (attackerId) => {
+    const attacker = colonies.find((c) => c.id === attackerId);
     if (!attacker) return;
+    const enemyDefBonus = 0.05 + (attacker.buildings.fortifications ?? 0) * 0.03;
+    const ourPower = (calcArmyPower(soldiers, attacker.army, techs) + totalWorkers * 0.2) * (1 + defensiveBonus);
+    const enemyPower = calcArmyPower(attacker.army, soldiers, []) * (1 + enemyDefBonus);
+    addCombatLog(`⚠️ Raid ${attacker.name}: Our ${ourPower.toFixed(1)} vs Enemy ${enemyPower.toFixed(1)} | Our def ${(defensiveBonus * 100).toFixed(1)}%.`);
 
-    if (buildings.watchtower > 0 && watchtowerScouts > 0) {
-      const watchChance = Math.min(0.95, 0.4 + watchtowerScouts * 0.18 + buildings.watchtower * 0.08);
-      if (Math.random() < watchChance) {
-        addCombatLog(
-          `👁️ Watch tower alert! Incoming attack from ${attacker.name}: ${formatArmy(attacker.army)} (Defense ${attacker.defense}).`
-        );
-      }
-    }
-
-    const playerDefense = calcArmyPower(soldiers, attacker.army, techs) + workers * 0.35;
-    const attackerArmyPower = calcArmyPower(attacker.army, soldiers, []);
-    const attackerPower = attackerArmyPower + attacker.defense * 0.5;
-
-    addCombatLog(
-      `⚠️ Enemy raid: ${attacker.name} | Defender power ${playerDefense.toFixed(1)} vs Attacker ${attackerPower.toFixed(1)} (Army ${attackerArmyPower.toFixed(1)} + Fort ${(attacker.defense * 0.5).toFixed(1)}).`
-    );
-
-    if (playerDefense >= attackerPower) {
-      const soldierLossRatio = Math.min(0.7, (attackerPower / Math.max(1, playerDefense)) * 0.25);
-      const losses = applyCasualties(soldierLossRatio);
-      addCombatLog(
-        `🛡️ Defense success | Soldier-loss ratio ${(soldierLossRatio * 100).toFixed(1)}% | Losses: ${formatCasualties(losses)}.`
-      );
+    if (ourPower >= enemyPower) {
+      const ratio = Math.min(0.7, (enemyPower / Math.max(1, ourPower)) * 0.25);
+      const losses = applyCasualties(ratio);
+      addCombatLog(`🛡️ Defended raid. Soldier losses C:${losses.cutter} S:${losses.stinger} D:${losses.shield}.`);
       return;
     }
 
-    const soldierLossRatio = Math.min(1, (attackerPower / Math.max(1, playerDefense)) * 0.4);
-    const losses = applyCasualties(soldierLossRatio);
-    const workerLosses = Math.min(workers, Math.max(1, Math.floor(attackerPower / 10)));
-    const stolenFood = Math.min(resources.food, Math.floor(resources.food * 0.2));
-    const stolenWood = Math.min(resources.wood, Math.floor(resources.wood * 0.2));
+    const ratio = Math.min(1, (enemyPower / Math.max(1, ourPower)) * 0.4);
+    const losses = applyCasualties(ratio);
+    const workerLosses = Math.min(totalWorkers, Math.max(1, Math.floor(enemyPower / 9)));
+    const split = { farmer: 0, woodcutter: 0, miner: 0 };
+    let remaining = workerLosses;
+    WORKER_TYPES.forEach((type) => {
+      const hit = Math.min(workers[type], Math.ceil(remaining / (WORKER_TYPES.length - WORKER_TYPES.indexOf(type))));
+      split[type] = hit;
+      remaining -= hit;
+    });
+    setWorkers((prev) => ({ farmer: Math.max(0, prev.farmer - split.farmer), woodcutter: Math.max(0, prev.woodcutter - split.woodcutter), miner: Math.max(0, prev.miner - split.miner) }));
 
-    setWorkers((prev) => Math.max(0, prev - workerLosses));
-    setResources((prev) => ({ food: prev.food - stolenFood, wood: prev.wood - stolenWood }));
+    let stolen = { food: 0, wood: 0, stone: 0 };
+    setResources((prev) => {
+      stolen = { food: Math.min(prev.food, Math.floor(prev.food * 0.2)), wood: Math.min(prev.wood, Math.floor(prev.wood * 0.2)), stone: Math.min(prev.stone, Math.floor(prev.stone * 0.2)) };
+      return { ...prev, food: prev.food - stolen.food, wood: prev.wood - stolen.wood, stone: prev.stone - stolen.stone };
+    });
 
-    const buildingIds = Object.keys(buildings);
-    const damagedId = buildingIds[Math.floor(Math.random() * buildingIds.length)];
-    if (buildings[damagedId] > 1) {
-      const nextBuildings = { ...buildings, [damagedId]: buildings[damagedId] - 1 };
-      setBuildings(nextBuildings);
-      updateBuildingEffects(nextBuildings);
-      addColonyLog(`🔥 ${BUILDING_DATA[damagedId].label} was damaged by ${attacker.name}.`);
-    }
-
-    addCombatLog(
-      `🔥 Defense failed | Soldier-loss ratio ${(soldierLossRatio * 100).toFixed(1)}% | Soldier losses: ${formatCasualties(losses)} | Worker losses: ${workerLosses} | Stolen ${stolenFood}F/${stolenWood}W.`
-    );
+    addCombatLog(`🔥 Defense failed. Soldiers lost C:${losses.cutter} S:${losses.stinger} D:${losses.shield}. Workers lost ${workerLosses}. Stolen ${stolen.food}F/${stolen.wood}W/${stolen.stone}S.`);
   };
 
   useEffect(() => {
-    if (raidPulse === 0) return;
-    if (!queenAlive || colonies.length === 0) return;
-    enemyAttack();
-  }, [raidPulse, queenAlive, colonies.length]);
+    const timer = setInterval(() => {
+      if (!raidPlan || !queenAlive || colonies.length === 0) return;
+      const remaining = raidPlan.attackAt - Date.now();
+      if (remaining <= 0) {
+        enemyAttack(raidPlan.attackerId);
+        scheduleNextRaid();
+        return;
+      }
+      if (!raidPlan.detected && buildings.watchtower > 0 && watchtowerScouts > 0) {
+        const chance = Math.min(0.45, 0.04 + buildings.watchtower * 0.05 + watchtowerScouts * 0.07);
+        if (Math.random() < chance) {
+          setRaidPlan((prev) => (prev ? { ...prev, detected: true } : prev));
+          const a = colonies.find((c) => c.id === raidPlan.attackerId);
+          if (a) addCombatLog(`👁️ Watch tower alert: ${a.name} incoming with ${formatArmy(a.army)}.`);
+        }
+      }
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [raidPlan, colonies, queenAlive, buildings.watchtower, watchtowerScouts, workers, soldiers, techs, defensiveBonus]);
 
   useEffect(() => {
-    if (queenAlive && workers <= 0 && totalSoldiers <= 0) {
+    if (queenAlive && totalWorkers <= 0 && totalSoldiers <= 0) {
       setQueenAlive(false);
-      addCombatLog('👑 The queen has fallen after all workers and soldiers were lost.');
+      addCombatLog('👑 All workers and soldiers lost. The queen has fallen.');
     }
-  }, [workers, totalSoldiers, queenAlive]);
+  }, [totalWorkers, totalSoldiers, queenAlive]);
 
-  const wonGame = colonies.length === 0;
+  const incomingRaid = raidPlan ? colonies.find((c) => c.id === raidPlan.attackerId) : null;
 
   const renderOverview = () => (
     <View style={styles.panel}>
@@ -602,53 +519,124 @@ export default function App() {
       <StatusBar style="light" />
       <ScrollView contentContainerStyle={styles.container}>
         <Text style={styles.title}>🐜 Ant Colony Commander</Text>
-        <Text style={styles.subtitle}>Colony status is always visible; manage units, buildings, tech, and enemies in separate menus.</Text>
+        <Text style={styles.subtitle}>Enemies start at your level and now evolve over time.</Text>
+
+        {raidPlan?.detected && incomingRaid ? (
+          <View style={styles.raidPopup}>
+            <Text style={styles.raidPopupTitle}>🚨 Incoming Raid Detected</Text>
+            <Text style={styles.raidPopupText}>{incomingRaid.name} arrives in {formatCountdown(raidPlan.attackAt - Date.now())}</Text>
+            <Text style={styles.raidPopupText}>Army: {formatArmy(incomingRaid.army)} | Defense {incomingRaid.defense}</Text>
+          </View>
+        ) : null}
 
         <View style={styles.panel}>
           <Text style={styles.panelTitle}>Colony Status</Text>
           <Text style={styles.metric}>🍖 Food: {Math.floor(resources.food)} / {resourceCaps.food}</Text>
           <Text style={styles.metric}>🪵 Wood: {Math.floor(resources.wood)} / {resourceCaps.wood}</Text>
-          <Text style={styles.metric}>👷 Workers: {workers} / {workerCap}</Text>
-          <Text style={styles.metric}>🕵️ Scouts: {scouts} (idle), {watchtowerScouts} (watch tower)</Text>
-          <Text style={styles.metric}>⚔️ Soldiers: {totalSoldiers} ({soldiers.cutter}C/{soldiers.stinger}S/{soldiers.shield}D)</Text>
-          {!queenAlive && <Text style={styles.defeat}>☠️ Game Over: the queen has been killed.</Text>}
+          <Text style={styles.metric}>🪨 Stone: {Math.floor(resources.stone)} / {resourceCaps.stone}</Text>
+          <Text style={styles.metric}>🧪 Research Points: {Math.floor(resources.research)}</Text>
+          <Text style={styles.metric}>🌾 Farmers: {workers.farmer} | 🪵 Woodcutters: {workers.woodcutter} | ⛏️ Miners: {workers.miner}</Text>
+          <Text style={styles.metric}>🧪 Scientists: {scientists}</Text>
+          <Text style={styles.metric}>⚔️ Soldiers: {totalSoldiers} ({soldiers.cutter}/{soldiers.stinger}/{soldiers.shield})</Text>
+          <Text style={styles.metric}>🛡️ Defensive advantage: {(defensiveBonus * 100).toFixed(1)}%</Text>
+          {!queenAlive && <Text style={styles.defeat}>☠️ Game Over</Text>}
         </View>
 
         <View style={styles.tabRow}>
           {TABS.map((tab) => (
-            <Pressable
-              key={tab}
-              style={[styles.tabButton, activeTab === tab && styles.tabButtonActive]}
-              onPress={() => setActiveTab(tab)}
-            >
+            <Pressable key={tab} style={[styles.tabButton, activeTab === tab && styles.tabButtonActive]} onPress={() => setActiveTab(tab)}>
               <Text style={styles.buttonText}>{tab.toUpperCase()}</Text>
             </Pressable>
           ))}
         </View>
 
-        {activeTab === 'overview' && renderOverview()}
-        {activeTab === 'units' && renderUnits()}
-        {activeTab === 'buildings' && renderBuildings()}
-        {activeTab === 'technology' && renderTechnology()}
-        {activeTab === 'enemies' && renderEnemies()}
+        {activeTab === 'overview' && (
+          <View style={styles.panel}>
+            <Text style={styles.panelTitle}>Overview</Text>
+            {Object.entries(BUILDING_DATA).map(([id, data]) => (
+              <Text key={id} style={styles.metric}>{data.icon} {data.label} Lv {buildings[id]}</Text>
+            ))}
+          </View>
+        )}
 
-        <View style={styles.panel}>
-          <Text style={styles.panelTitle}>Combat Log</Text>
-          {combatLog.map((entry, index) => (
-            <Text key={`${entry}-${index}`} style={styles.logItem}>
-              • {entry}
-            </Text>
-          ))}
-        </View>
+        {activeTab === 'units' && (
+          <View style={styles.panel}>
+            <Text style={styles.panelTitle}>Units</Text>
+            <View style={styles.rowWrap}>
+              {WORKER_TYPES.map((type) => (
+                <ActionButton key={type} compact label={`${WORKER_ICONS[type]} ${WORKER_LABELS[type]}`} subLabel="(14F)" onPress={() => trainWorker(type)} disabled={!queenAlive} />
+              ))}
+              <ActionButton compact label="🧪 Scientist" subLabel="(24F/12W/10S)" onPress={trainScientist} disabled={!queenAlive} />
+              <ActionButton compact label="🕵️ Scout" subLabel="(22F/6W/4S)" onPress={trainScout} disabled={!queenAlive} />
+            </View>
+            <View style={styles.rowWrap}>
+              {SOLDIER_TYPES.map((type) => (
+                <ActionButton key={type} compact label={`${TYPE_ICONS[type]} ${TYPE_LABELS[type]}`} subLabel={type === 'cutter' ? '(18F/8W/5S)' : type === 'stinger' ? '(16F/10W/5S)' : '(20F/12W/8S)'} onPress={() => trainSoldier(type)} disabled={!queenAlive} />
+              ))}
+            </View>
+          </View>
+        )}
 
-        <View style={styles.panel}>
-          <Text style={styles.panelTitle}>Colony Log</Text>
-          {colonyLog.map((entry, index) => (
-            <Text key={`${entry}-${index}`} style={styles.logItem}>
-              • {entry}
-            </Text>
-          ))}
-        </View>
+        {activeTab === 'buildings' && (
+          <View style={styles.panel}>
+            <Text style={styles.panelTitle}>Buildings</Text>
+            {Object.entries(BUILDING_DATA).map(([id, data]) => {
+              const level = buildings[id];
+              const maxed = level >= data.maxLevel;
+              const cost = data.costForLevel(level + 1);
+              return (
+                <Pressable key={id} style={[styles.techBtn, maxed && styles.techDone]} onPress={() => upgradeBuilding(id)}>
+                  <Text style={styles.buttonText}>{data.icon} Upgrade {data.label} (Lv {level}/{data.maxLevel})</Text>
+                  <Text style={styles.techDesc}>{maxed ? 'Max level reached' : `Cost ${cost.food}F/${cost.wood}W/${cost.stone}S • ${data.benefitText}`}</Text>
+                </Pressable>
+              );
+            })}
+            <View style={styles.row}>
+              <ActionButton compact label="➕ Assign Scout" onPress={assignScoutToWatchtower} disabled={!queenAlive} />
+              <ActionButton compact label="➖ Recall Scout" onPress={unassignScoutFromWatchtower} disabled={!queenAlive} />
+            </View>
+            <Text style={styles.techDesc}>Watch tower scouts: {watchtowerScouts}/{Math.min(3, buildings.watchtower)}</Text>
+          </View>
+        )}
+
+        {activeTab === 'technology' && (
+          <View style={styles.panel}>
+            <Text style={styles.panelTitle}>Technology</Text>
+            {Object.values(RESEARCH_TREE).map((tech) => {
+              const complete = techs.includes(tech.id);
+              return (
+                <Pressable key={tech.id} style={[styles.techBtn, complete && styles.techDone]} onPress={() => researchTech(tech.id)}>
+                  <Text style={styles.buttonText}>{tech.icon} {tech.label} ({tech.cost.food}F/{tech.cost.wood}W/{tech.cost.stone}S/{tech.cost.research}RP)</Text>
+                  <Text style={styles.techDesc}>{complete ? 'Completed' : tech.description}</Text>
+                </Pressable>
+              );
+            })}
+          </View>
+        )}
+
+        {activeTab === 'enemies' && (
+          <View style={styles.panel}>
+            <Text style={styles.panelTitle}>Enemies</Text>
+            {colonies.map((colony) => {
+              const report = intel[colony.id];
+              return (
+                <View key={colony.id} style={styles.enemyCard}>
+                  <Text style={styles.metric}>🏰 {colony.name}</Text>
+                  <Text style={styles.techDesc}>Defense: {report ? report.defense : 'Unknown'}</Text>
+                  <Text style={styles.techDesc}>Army: {report ? formatArmy(report.army) : 'Unknown'}</Text>
+                  <Text style={styles.techDesc}>Growth: Workers {sumWorkers(colony.workers)} | Scientists {colony.scientists}</Text>
+                  <View style={styles.row}>
+                    <ActionButton compact label="🧭 Scout" onPress={() => scoutColony(colony.id)} disabled={!queenAlive} />
+                    <ActionButton compact label="⚔️ Attack" onPress={() => attackColony(colony.id)} disabled={!queenAlive} />
+                  </View>
+                </View>
+              );
+            })}
+          </View>
+        )}
+
+        <View style={styles.panel}><Text style={styles.panelTitle}>Combat Log</Text>{combatLog.map((e, i) => <Text key={`c-${i}`} style={styles.logItem}>• {e}</Text>)}</View>
+        <View style={styles.panel}><Text style={styles.panelTitle}>Colony Log</Text>{colonyLog.map((e, i) => <Text key={`l-${i}`} style={styles.logItem}>• {e}</Text>)}</View>
       </ScrollView>
     </SafeAreaView>
   );
@@ -656,11 +644,7 @@ export default function App() {
 
 function ActionButton({ label, subLabel, onPress, disabled, compact }) {
   return (
-    <Pressable
-      style={[styles.actionBtn, compact && styles.actionBtnCompact, disabled && styles.btnDisabled]}
-      onPress={onPress}
-      disabled={disabled}
-    >
+    <Pressable style={[styles.actionBtn, compact && styles.actionBtnCompact, disabled && styles.btnDisabled]} onPress={onPress} disabled={disabled}>
       <Text style={styles.buttonText}>{label}</Text>
       {subLabel ? <Text style={styles.subButtonText}>{subLabel}</Text> : null}
     </Pressable>
@@ -668,131 +652,29 @@ function ActionButton({ label, subLabel, onPress, disabled, compact }) {
 }
 
 const styles = StyleSheet.create({
-  screen: {
-    flex: 1,
-    backgroundColor: '#101915',
-  },
-  container: {
-    padding: 16,
-    paddingBottom: 32,
-    gap: 12,
-  },
-  title: {
-    color: '#effbee',
-    fontSize: 30,
-    fontWeight: '700',
-    textAlign: 'center',
-  },
-  subtitle: {
-    color: '#aac8af',
-    textAlign: 'center',
-    marginBottom: 4,
-  },
-  panel: {
-    backgroundColor: '#1a2a24',
-    borderWidth: 1,
-    borderColor: '#2d453b',
-    borderRadius: 12,
-    padding: 12,
-    gap: 6,
-  },
-  panelInset: {
-    marginTop: 6,
-    backgroundColor: '#2a3f34',
-    borderRadius: 10,
-    padding: 8,
-    gap: 6,
-  },
-  panelTitle: {
-    color: '#dcf2e0',
-    fontSize: 18,
-    fontWeight: '700',
-    marginBottom: 4,
-  },
-  metric: {
-    color: '#e3f1e6',
-    fontSize: 15,
-  },
-  row: {
-    flexDirection: 'row',
-    gap: 8,
-  },
-  rowWrap: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-  },
-  tabRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-  },
-  tabButton: {
-    backgroundColor: '#2f5343',
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    borderRadius: 8,
-  },
-  tabButtonActive: {
-    backgroundColor: '#4e7d67',
-  },
-  actionBtn: {
-    flex: 1,
-    backgroundColor: '#466f5c',
-    borderRadius: 10,
-    paddingVertical: 10,
-    paddingHorizontal: 8,
-    alignItems: 'center',
-  },
-  actionBtnCompact: {
-    flex: 0,
-    minWidth: 120,
-  },
-  btnDisabled: {
-    opacity: 0.55,
-  },
-  subButtonText: {
-    color: '#ddf5e2',
-    fontSize: 11,
-    marginTop: 2,
-  },
-  techBtn: {
-    backgroundColor: '#365746',
-    borderRadius: 10,
-    padding: 10,
-    marginBottom: 6,
-  },
-  techDone: {
-    opacity: 0.6,
-  },
-  techDesc: {
-    color: '#cbe4d0',
-    marginTop: 2,
-    fontSize: 12,
-  },
-  buttonText: {
-    color: '#f4fff6',
-    fontWeight: '700',
-  },
-  victory: {
-    color: '#ffe999',
-    fontSize: 16,
-    fontWeight: '700',
-  },
-  defeat: {
-    color: '#ffb1b1',
-    fontSize: 15,
-    fontWeight: '700',
-  },
-  enemyCard: {
-    backgroundColor: '#2a3f34',
-    borderRadius: 10,
-    padding: 9,
-    marginBottom: 8,
-    gap: 4,
-  },
-  logItem: {
-    color: '#d7ebdb',
-    fontSize: 13,
-  },
+  screen: { flex: 1, backgroundColor: '#101915' },
+  container: { padding: 16, paddingBottom: 32, gap: 12 },
+  title: { color: '#effbee', fontSize: 30, fontWeight: '700', textAlign: 'center' },
+  subtitle: { color: '#aac8af', textAlign: 'center', marginBottom: 4 },
+  raidPopup: { alignSelf: 'center', backgroundColor: '#8d2d2d', borderColor: '#d57171', borderWidth: 1, borderRadius: 10, paddingVertical: 8, paddingHorizontal: 12, minWidth: '88%' },
+  raidPopupTitle: { color: '#ffe9e9', fontWeight: '700', textAlign: 'center' },
+  raidPopupText: { color: '#ffe9e9', textAlign: 'center', fontSize: 12 },
+  panel: { backgroundColor: '#1a2a24', borderWidth: 1, borderColor: '#2d453b', borderRadius: 12, padding: 12, gap: 6 },
+  panelTitle: { color: '#dcf2e0', fontSize: 18, fontWeight: '700', marginBottom: 4 },
+  metric: { color: '#e3f1e6', fontSize: 15 },
+  row: { flexDirection: 'row', gap: 8 },
+  rowWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  tabRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  tabButton: { backgroundColor: '#2f5343', paddingHorizontal: 10, paddingVertical: 8, borderRadius: 8 },
+  tabButtonActive: { backgroundColor: '#4e7d67' },
+  actionBtn: { flex: 1, backgroundColor: '#466f5c', borderRadius: 10, paddingVertical: 10, paddingHorizontal: 8, alignItems: 'center' },
+  actionBtnCompact: { flex: 0, minWidth: 118 },
+  btnDisabled: { opacity: 0.55 },
+  subButtonText: { color: '#ddf5e2', fontSize: 11, marginTop: 2 },
+  techBtn: { backgroundColor: '#365746', borderRadius: 10, padding: 10, marginBottom: 6 },
+  techDone: { opacity: 0.6 },
+  techDesc: { color: '#cbe4d0', marginTop: 2, fontSize: 12 },
+  defeat: { color: '#ffb1b1', fontSize: 15, fontWeight: '700' },
+  enemyCard: { backgroundColor: '#2a3f34', borderRadius: 10, padding: 9, marginBottom: 8, gap: 4 },
+  logItem: { color: '#d7ebdb', fontSize: 13 },
 });
